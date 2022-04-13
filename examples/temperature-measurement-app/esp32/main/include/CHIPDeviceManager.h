@@ -38,6 +38,10 @@
 
 #include <app/util/af-types.h>
 
+#include "driver/temperature_sensor.h"
+
+extern temperature_sensor_handle_t temp_handle;
+
 namespace chip {
 namespace DeviceManager {
 

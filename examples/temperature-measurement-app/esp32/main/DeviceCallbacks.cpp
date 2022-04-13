@@ -33,6 +33,9 @@
 #include <app-common/zap-generated/cluster-id.h>
 #include <app/server/Dnssd.h>
 #include <lib/support/CodeUtils.h>
+#include "driver/temperature_sensor.h"
+
+#include <app-common/zap-generated/attributes/Accessors.h>
 
 static const char * TAG = "echo-devicecallbacks";
 
@@ -40,6 +43,8 @@ using namespace ::chip;
 using namespace ::chip::Inet;
 using namespace ::chip::System;
 using namespace ::chip::DeviceLayer;
+
+using namespace chip::app::Clusters;
 
 void DeviceCallbacks::DeviceEventCallback(const ChipDeviceEvent * event, intptr_t arg)
 {
@@ -112,4 +117,42 @@ void DeviceCallbacks::OnSessionEstablished(const ChipDeviceEvent * event)
     {
         ESP_LOGI(TAG, "Commissioner detected!");
     }
+}
+
+void TemperatureMeasurementAttributeReadAccessCallback(EndpointId endpoint, ClusterId clusterId, AttributeId attributeId)
+{
+    float tsens_out;
+
+    // Verify attribute and endpoint
+    VerifyOrReturn(attributeId == TemperatureMeasurement::Attributes::MeasuredValue::Id);
+    VerifyOrReturn(endpoint == 1);
+
+    // Read temperature from HW
+    if (temperature_sensor_get_celsius(temp_handle, &tsens_out) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Error reading temperature");
+        return;
+    }
+
+    // Update attribute
+    TemperatureMeasurement::Attributes::MeasuredValue::Set(1, static_cast<int16_t>(tsens_out * 100));
+    ESP_LOGI(TAG, "Temperature out celsius %.02f", tsens_out);
+}
+
+bool emberAfAttributeReadAccessCallback(EndpointId endpoint, ClusterId clusterId, AttributeId attributeId)
+{
+    ESP_LOGI(TAG, "emberAfAttributeReadAccessCallback - Cluster ID: '0x%04x', EndPoint ID: '0x%02x', Attribute ID: '0x%04x'", clusterId,
+             endpoint, attributeId);
+             
+    switch (clusterId)
+    {
+    case TemperatureMeasurement::Id:
+        TemperatureMeasurementAttributeReadAccessCallback(endpoint, clusterId, attributeId);
+        break;
+
+    default:
+        break;
+    }
+
+    return true;
 }
