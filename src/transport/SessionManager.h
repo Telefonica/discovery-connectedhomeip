@@ -249,9 +249,17 @@ public:
         return mUnauthenticatedSessions.AllocInitiator(ephemeralInitiatorNodeID, peerAddress, config);
     }
 
-    // TODO: this is a temporary solution for legacy tests which use nodeId to send packets
-    // and tv-casting-app that uses the TV's node ID to find the associated secure session
-    SessionHandle FindSecureSessionForNode(NodeId peerNodeId);
+    //
+    // Find an existing secure session given a peer's scoped NodeId and a type of session to match against.
+    // If matching against all types of sessions is desired, kUndefined should be passed into type.
+    //
+    // If a valid session is found, an Optional<SessionHandle> with the value set to the SessionHandle of the session
+    // is returned. Otherwise, an Optional<SessionHandle> with no value set is returned.
+    //
+    //
+    Optional<SessionHandle>
+    FindSecureSessionForNode(ScopedNodeId peerNodeId,
+                             Transport::SecureSession::Type type = Transport::SecureSession::Type::kUndefined);
 
     using SessionHandleCallback = bool (*)(void * context, SessionHandle & sessionHandle);
     CHIP_ERROR ForEachSessionHandle(void * context, SessionHandleCallback callback);
@@ -288,7 +296,6 @@ private:
     Transport::MessageCounterManagerInterface * mMessageCounterManager = nullptr;
 
     GlobalUnencryptedMessageCounter mGlobalUnencryptedMessageCounter;
-    GlobalEncryptedMessageCounter mGlobalEncryptedMessageCounter;
 
     friend class SessionHandle;
 
@@ -318,16 +325,6 @@ private:
     {
         return payloadHeader.HasMessageType(Protocols::SecureChannel::MsgType::MsgCounterSyncReq) ||
             payloadHeader.HasMessageType(Protocols::SecureChannel::MsgType::MsgCounterSyncRsp);
-    }
-
-    MessageCounter & GetSendCounterForPacket(PayloadHeader & payloadHeader, Transport::SecureSession & state)
-    {
-        if (IsControlMessage(payloadHeader))
-        {
-            return mGlobalEncryptedMessageCounter;
-        }
-
-        return state.GetSessionMessageCounter().GetLocalMessageCounter();
     }
 };
 
