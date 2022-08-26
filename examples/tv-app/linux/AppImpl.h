@@ -30,6 +30,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "CommissionerMain.h"
 #include "include/account-login/AccountLoginManager.h"
 #include "include/application-basic/ApplicationBasicManager.h"
 #include "include/application-launcher/ApplicationLauncherManager.h"
@@ -46,6 +47,8 @@
 #include <app/clusters/keypad-input-server/keypad-input-delegate.h>
 #include <app/clusters/media-playback-server/media-playback-delegate.h>
 #include <app/clusters/target-navigator-server/target-navigator-delegate.h>
+
+CHIP_ERROR InitVideoPlayerPlatform();
 
 #if CHIP_DEVICE_CONFIG_APP_PLATFORM_ENABLED
 
@@ -122,15 +125,28 @@ public:
     // and then writes it to destinationApp
     CHIP_ERROR ConvertToPlatformCatalogVendorApp(const CatalogVendorApp & sourceApp, CatalogVendorApp * destinationApp) override;
 
+    // Get the privilege this vendorId should have on endpoints 1, 2, and content app endpoints
+    // In the case of casting video clients, this should usually be Access::Privilege::kOperate
+    // and for voice agents, this may be Access::Privilege::kAdminister
+    // When a vendor has admin privileges, it will get access to all clusters on ep1
+    Access::Privilege GetVendorPrivilege(uint16_t vendorId) override;
+
+    void AddAdminVendorId(uint16_t vendorId);
+
 protected:
-    ContentAppImpl mContentApps[APP_LIBRARY_SIZE] = { ContentAppImpl("Vendor1", 1, "App1", 11, "Version1", "34567890"),
-                                                      ContentAppImpl("Vendor2", 65521, "App2", 32768, "Version2", "20202021"),
-                                                      ContentAppImpl("Vendor3", 9050, "App3", 22, "Version3", "20202021"),
-                                                      ContentAppImpl("TestSuiteVendor", 1111, "applicationId", 22, "v2",
-                                                                     "20202021") };
+    ContentAppImpl mContentApps[APP_LIBRARY_SIZE] = {
+        ContentAppImpl("Vendor1", 1, "exampleid", 11, "Version1", "34567890"),
+        ContentAppImpl("Vendor2", 65521, "exampleString", 32768, "Version2", "20202021"),
+        ContentAppImpl("Vendor3", 9050, "App3", 22, "Version3", "20202021"),
+        ContentAppImpl("TestSuiteVendor", 1111, "applicationId", 22, "v2", "20202021")
+    };
+
+    std::vector<uint16_t> mAdminVendorIds{};
 };
 
 } // namespace AppPlatform
 } // namespace chip
+
+chip::AppPlatform::ContentAppFactoryImpl * GetContentAppFactoryImpl();
 
 #endif // CHIP_DEVICE_CONFIG_APP_PLATFORM_ENABLED

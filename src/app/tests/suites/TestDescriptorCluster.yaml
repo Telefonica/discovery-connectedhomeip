@@ -50,6 +50,7 @@ tests:
                   0x002C, # Time Format Localization
                   0x002D, # Unit Localization
                   0x002E, # Power Source Configuration
+                  0x002F, # Power Source
                   0x0030, # General Commissioning
                   0x0031, # Network Commissioning
                   0x0032, # Diagnostic Logs
@@ -64,6 +65,7 @@ tests:
                   0x0040, # Fixed Label
                   0x0041, # User Label
                   0x0405, # Relative Humidity Measurement (why on EP0?)
+                  0xFFF1FC06, # Fault Injection
               ]
 
     - label: "Read attribute Client list"

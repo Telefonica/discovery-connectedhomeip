@@ -59,9 +59,6 @@ static int app_entropy_source(void * data, unsigned char * output, size_t len, s
 
 CHIP_ERROR PlatformManagerImpl::_InitChipStack(void)
 {
-    SetConfigurationMgr(&ConfigurationManagerImpl::GetDefaultInstance());
-    SetDiagnosticDataProvider(&DiagnosticDataProviderImpl::GetDefaultInstance());
-
     esp_err_t err;
     // Arrange for CHIP-encapsulated ESP32 errors to be translated to text
     Internal::ESP32Utils::RegisterESP32ErrorFormatter();
@@ -87,8 +84,9 @@ CHIP_ERROR PlatformManagerImpl::_InitChipStack(void)
         wifi_init_config_t cfg;
         uint8_t ap_mac[6];
         wifi_mode_t mode;
-
+#if CHIP_DEVICE_CONFIG_ENABLE_WIFI_AP
         esp_netif_create_default_wifi_ap();
+#endif // CHIP_DEVICE_CONFIG_ENABLE_WIFI_AP
         esp_netif_create_default_wifi_sta();
 
         esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, PlatformManagerImpl::HandleESPSystemEvent, NULL);
@@ -129,7 +127,7 @@ exit:
     return chip::DeviceLayer::Internal::ESP32Utils::MapError(err);
 }
 
-CHIP_ERROR PlatformManagerImpl::_Shutdown()
+void PlatformManagerImpl::_Shutdown()
 {
     uint64_t upTime = 0;
 
@@ -151,7 +149,7 @@ CHIP_ERROR PlatformManagerImpl::_Shutdown()
         ChipLogError(DeviceLayer, "Failed to get current uptime since the Node’s last reboot");
     }
 
-    return Internal::GenericPlatformManagerImpl_FreeRTOS<PlatformManagerImpl>::_Shutdown();
+    Internal::GenericPlatformManagerImpl_FreeRTOS<PlatformManagerImpl>::_Shutdown();
 }
 
 void PlatformManagerImpl::HandleESPSystemEvent(void * arg, esp_event_base_t eventBase, int32_t eventId, void * eventData)

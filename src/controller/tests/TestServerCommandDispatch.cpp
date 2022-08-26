@@ -26,7 +26,7 @@
 #include "app-common/zap-generated/ids/Clusters.h"
 #include "protocols/interaction_model/Constants.h"
 #include <app-common/zap-generated/cluster-objects.h>
-#include <app/AppBuildConfig.h>
+#include <app/AppConfig.h>
 #include <app/CommandHandlerInterface.h>
 #include <app/InteractionModelEngine.h>
 #include <app/tests/AppTestContext.h>
@@ -34,6 +34,7 @@
 #include <controller/InvokeInteraction.h>
 #include <controller/ReadInteraction.h>
 #include <lib/support/ErrorStr.h>
+#include <lib/support/UnitTestContext.h>
 #include <lib/support/UnitTestRegistration.h>
 #include <lib/support/logging/CHIPLogging.h>
 #include <messaging/tests/MessagingContext.h>
@@ -184,8 +185,6 @@ void TestCommandInteraction::TestNoHandler(nlTestSuite * apSuite, void * apConte
 
     responseDirective = kSendDataResponse;
 
-    ctx.EnableAsyncDispatch();
-
     chip::Controller::InvokeCommandRequest(&ctx.GetExchangeManager(), sessionHandle, kTestEndpointId, request, onSuccessCb,
                                            onFailureCb);
 
@@ -323,7 +322,10 @@ void TestCommandInteraction::TestDataResponseHelper(nlTestSuite * apSuite, void 
         }
         onSuccessWasCalled = true;
     };
-    auto readFailureCb = [&onFailureWasCalled](const ConcreteDataAttributePath *, CHIP_ERROR aError) { onFailureWasCalled = true; };
+    auto readFailureCb = [&onFailureWasCalled](const ConcreteDataAttributePath *, CHIP_ERROR aError) {
+        onFailureWasCalled = true;
+        ChipLogError(NotSpecified, "TEST FAILURE: %" CHIP_ERROR_FORMAT, aError.Format());
+    };
 
     chip::Controller::ReadAttribute<TestCluster::Attributes::AcceptedCommandList::TypeInfo>(
         &ctx.GetExchangeManager(), sessionHandle, kTestEndpointId, readSuccessCb, readFailureCb);
@@ -402,7 +404,7 @@ nlTestSuite sSuite =
 {
     "TestCommands",
     &sTests[0],
-    TestContext::InitializeAsync,
+    TestContext::Initialize,
     TestContext::Finalize
 };
 // clang-format on
@@ -411,9 +413,7 @@ nlTestSuite sSuite =
 
 int TestCommandInteractionTest()
 {
-    TestContext gContext;
-    nlTestRunner(&sSuite, &gContext);
-    return (nlTestRunnerStats(&sSuite));
+    return chip::ExecuteTestsWithContext<TestContext>(&sSuite);
 }
 
 CHIP_REGISTER_TEST_SUITE(TestCommandInteractionTest)

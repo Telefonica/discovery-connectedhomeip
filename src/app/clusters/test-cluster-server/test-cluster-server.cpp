@@ -233,7 +233,7 @@ CHIP_ERROR TestAttrAccess::WriteNullableStruct(AttributeValueDecoder & aDecoder)
 CHIP_ERROR TestAttrAccess::ReadListInt8uAttribute(AttributeValueEncoder & aEncoder)
 {
     return aEncoder.EncodeList([](const auto & encoder) -> CHIP_ERROR {
-        for (uint8_t index = 0; index < gListUint8DataLen; index++)
+        for (size_t index = 0; index < gListUint8DataLen; index++)
         {
             ReturnErrorOnFailure(encoder.Encode(gListUint8Data[index]));
         }
@@ -281,7 +281,7 @@ CHIP_ERROR TestAttrAccess::WriteListInt8uAttribute(const ConcreteDataAttributePa
 CHIP_ERROR TestAttrAccess::ReadListOctetStringAttribute(AttributeValueEncoder & aEncoder)
 {
     return aEncoder.EncodeList([](const auto & encoder) -> CHIP_ERROR {
-        for (uint8_t index = 0; index < gListOctetStringDataLen; index++)
+        for (size_t index = 0; index < gListOctetStringDataLen; index++)
         {
             ReturnErrorOnFailure(encoder.Encode(gListOctetStringData[index].AsSpan()));
         }
@@ -335,7 +335,7 @@ CHIP_ERROR TestAttrAccess::ReadListLongOctetStringAttribute(AttributeValueEncode
     // The ListOctetStringAttribute takes 512 bytes, and the whole attribute will exceed the IPv6 MTU, so we can test list chunking
     // feature with this attribute.
     return aEncoder.EncodeList([](const auto & encoder) -> CHIP_ERROR {
-        for (uint8_t index = 0; index < gListLongOctetStringLen; index++)
+        for (size_t index = 0; index < gListLongOctetStringLen; index++)
         {
             ReturnErrorOnFailure(encoder.Encode(ByteSpan(chip::Uint8::from_const_char(sLongOctetStringBuf), 512)));
         }
@@ -381,11 +381,11 @@ CHIP_ERROR TestAttrAccess::WriteListLongOctetStringAttribute(const ConcreteDataA
 CHIP_ERROR TestAttrAccess::ReadListStructOctetStringAttribute(AttributeValueEncoder & aEncoder)
 {
     return aEncoder.EncodeList([](const auto & encoder) -> CHIP_ERROR {
-        for (uint8_t index = 0; index < gListOperationalCertLen; index++)
+        for (size_t index = 0; index < gListOperationalCertLen; index++)
         {
             Structs::TestListStructOctet::Type structOctet;
-            structOctet.fabricIndex     = listStructOctetStringData[index].fabricIndex;
-            structOctet.operationalCert = listStructOctetStringData[index].operationalCert;
+            structOctet.member1 = listStructOctetStringData[index].member1;
+            structOctet.member2 = listStructOctetStringData[index].member2;
             ReturnErrorOnFailure(encoder.Encode(structOctet));
         }
 
@@ -409,12 +409,12 @@ CHIP_ERROR TestAttrAccess::WriteListStructOctetStringAttribute(const ConcreteDat
             const auto & entry = iter.GetValue();
 
             VerifyOrReturnError(index < kAttributeListLength, CHIP_ERROR_BUFFER_TOO_SMALL);
-            VerifyOrReturnError(entry.operationalCert.size() <= kAttributeEntryLength, CHIP_ERROR_BUFFER_TOO_SMALL);
-            memcpy(gListOperationalCert[index].Data(), entry.operationalCert.data(), entry.operationalCert.size());
-            gListOperationalCert[index].SetLength(entry.operationalCert.size());
+            VerifyOrReturnError(entry.member2.size() <= kAttributeEntryLength, CHIP_ERROR_BUFFER_TOO_SMALL);
+            memcpy(gListOperationalCert[index].Data(), entry.member2.data(), entry.member2.size());
+            gListOperationalCert[index].SetLength(entry.member2.size());
 
-            listStructOctetStringData[index].fabricIndex     = entry.fabricIndex;
-            listStructOctetStringData[index].operationalCert = gListOperationalCert[index].AsSpan();
+            listStructOctetStringData[index].member1 = entry.member1;
+            listStructOctetStringData[index].member2 = gListOperationalCert[index].AsSpan();
 
             index++;
         }
@@ -435,12 +435,12 @@ CHIP_ERROR TestAttrAccess::WriteListStructOctetStringAttribute(const ConcreteDat
         size_t index = gListOperationalCertLen;
 
         VerifyOrReturnError(index < kAttributeListLength, CHIP_ERROR_BUFFER_TOO_SMALL);
-        VerifyOrReturnError(entry.operationalCert.size() <= kAttributeEntryLength, CHIP_ERROR_BUFFER_TOO_SMALL);
-        memcpy(gListOperationalCert[index].Data(), entry.operationalCert.data(), entry.operationalCert.size());
-        gListOperationalCert[index].SetLength(entry.operationalCert.size());
+        VerifyOrReturnError(entry.member2.size() <= kAttributeEntryLength, CHIP_ERROR_BUFFER_TOO_SMALL);
+        memcpy(gListOperationalCert[index].Data(), entry.member2.data(), entry.member2.size());
+        gListOperationalCert[index].SetLength(entry.member2.size());
 
-        listStructOctetStringData[index].fabricIndex     = entry.fabricIndex;
-        listStructOctetStringData[index].operationalCert = gListOperationalCert[index].AsSpan();
+        listStructOctetStringData[index].member1 = entry.member1;
+        listStructOctetStringData[index].member2 = gListOperationalCert[index].AsSpan();
 
         gListOperationalCertLen++;
         return CHIP_NO_ERROR;
@@ -681,9 +681,9 @@ bool emberAfTestClusterClusterTestCallback(app::CommandHandler *, const app::Con
         gListUint8Data[i] = 0;
         gListOctetStringData[i].SetLength(0);
         gListOperationalCert[i].SetLength(0);
-        listStructOctetStringData[i].fabricIndex     = 0;
-        listStructOctetStringData[i].operationalCert = ByteSpan();
-        gSimpleEnums[i]                              = SimpleEnum::kUnspecified;
+        listStructOctetStringData[i].member1 = 0;
+        listStructOctetStringData[i].member2 = ByteSpan();
+        gSimpleEnums[i]                      = SimpleEnum::kUnspecified;
     }
     gSimpleEnumCount = 0;
 
@@ -797,7 +797,7 @@ bool emberAfTestClusterClusterTestEmitTestFabricScopedEventRequestCallback(
 {
     Commands::TestEmitTestFabricScopedEventResponse::Type responseData;
     Events::TestFabricScopedEvent::Type event{ commandData.arg1 };
-
+    event.fabricIndex = commandData.arg1;
     if (CHIP_NO_ERROR != LogEvent(event, commandPath.mEndpointId, responseData.value))
     {
         emberAfSendImmediateDefaultResponse(EMBER_ZCL_STATUS_FAILURE);

@@ -69,14 +69,27 @@ private:
     void OnReportBegin() override;
     void OnReportEnd() override;
     void OnAttributeData(const ConcreteDataAttributePath & aPath, TLV::TLVReader * apData, const StatusIB & aStatus) override;
-    void OnError(CHIP_ERROR aError) override { return mCallback.OnError(aError); }
+    void OnError(CHIP_ERROR aError) override
+    {
+        mBufferedList.clear();
+        return mCallback.OnError(aError);
+    }
+
     void OnEventData(const EventHeader & aEventHeader, TLV::TLVReader * apData, const StatusIB * apStatus) override
     {
         return mCallback.OnEventData(aEventHeader, apData, apStatus);
     }
 
-    void OnDone() override { return mCallback.OnDone(); }
-    void OnSubscriptionEstablished(uint64_t aSubscriptionId) override { mCallback.OnSubscriptionEstablished(aSubscriptionId); }
+    void OnDone(ReadClient * apReadClient) override { return mCallback.OnDone(apReadClient); }
+    void OnSubscriptionEstablished(SubscriptionId aSubscriptionId) override
+    {
+        mCallback.OnSubscriptionEstablished(aSubscriptionId);
+    }
+
+    CHIP_ERROR OnResubscriptionNeeded(ReadClient * apReadClient, CHIP_ERROR aTerminationCause) override
+    {
+        return mCallback.OnResubscriptionNeeded(apReadClient, aTerminationCause);
+    }
 
     void OnDeallocatePaths(chip::app::ReadPrepareParams && aReadPrepareParams) override
     {
@@ -90,6 +103,10 @@ private:
         return mCallback.OnUpdateDataVersionFilterList(aDataVersionFilterIBsBuilder, aAttributePaths, aEncodedDataVersionList);
     }
 
+    virtual CHIP_ERROR GetHighestReceivedEventNumber(Optional<EventNumber> & aEventNumber) override
+    {
+        return mCallback.GetHighestReceivedEventNumber(aEventNumber);
+    }
     /*
      * Given a reader positioned at a list element, allocate a packet buffer, copy the list item where
      * the reader is positioned into that buffer and add it to our buffered list for tracking.

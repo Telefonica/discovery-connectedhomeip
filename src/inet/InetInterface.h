@@ -185,7 +185,9 @@ public:
      *  @retval    #CHIP_ERROR_INVALID_ARGUMENT     If the link local address
      *                                              is nullptr.
      *  @retval    #INET_ERROR_ADDRESS_NOT_FOUND    If the link does not have
-     *                                              any address configured.
+     *                                              any address configured
+     *                                              or if no link local (fe80::)
+     *                                              address is present.
      *  @retval    #CHIP_NO_ERROR                   On success.
      */
     CHIP_ERROR GetLinkLocalAddr(IPAddress * llAddr) const;
@@ -540,15 +542,13 @@ private:
     int mCurAddrIndex   = -1;
 #endif // CHIP_SYSTEM_CONFIG_USE_ZEPHYR_NET_IF
 #if CHIP_SYSTEM_CONFIG_USE_OPEN_THREAD_ENDPOINT
-    otIp6AddressInfo * mAddrInfoList;
-    int mCurAddrIndex;
-    InterfaceIterator mIntfIter;
+    const otNetifAddress * mNetifAddrList;
+    const otNetifAddress * mCurAddr;
 #endif // #if CHIP_SYSTEM_CONFIG_USE_OPEN_THREAD_ENDPOINT
 };
 
 #if CHIP_SYSTEM_CONFIG_USE_OPEN_THREAD_ENDPOINT
 inline InterfaceIterator::InterfaceIterator(void) {}
-inline InterfaceAddressIterator::InterfaceAddressIterator(void) {}
 inline InterfaceIterator::~InterfaceIterator()               = default;
 inline InterfaceAddressIterator::~InterfaceAddressIterator() = default;
 inline bool InterfaceIterator::HasCurrent(void)

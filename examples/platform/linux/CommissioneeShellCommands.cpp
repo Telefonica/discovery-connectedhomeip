@@ -61,8 +61,14 @@ static CHIP_ERROR PrintAllCommands()
 #if CHIP_DEVICE_CONFIG_ENABLE_COMMISSIONER_DISCOVERY_CLIENT
     streamer_printf(sout, "  sendudc <address> <port>   Send UDC message to address. Usage: commissionee sendudc ::1 5543\r\n");
 #endif // CHIP_DEVICE_CONFIG_ENABLE_COMMISSIONER_DISCOVERY_CLIENT
+    // TODO: Figure out whether setdiscoverytimeout is a reasonable thing to do
+    // at all, and if so what semantics it should have.  Presumably it should
+    // affect BLE discovery too, not just DNS-SD.  How should it interact with
+    // explicit timeouts specified in OpenCommissioningWindow?
+#if 0
     streamer_printf(
         sout, "  setdiscoverytimeout <timeout>   Set discovery timeout in seconds. Usage: commissionee setdiscoverytimeout 30\r\n");
+#endif
 #if CHIP_DEVICE_CONFIG_ENABLE_EXTENDED_DISCOVERY
     streamer_printf(sout,
                     "  setextendeddiscoverytimeout <timeout>   Set extendeddiscovery timeout in seconds. Usage: commissionee "
@@ -72,6 +78,7 @@ static CHIP_ERROR PrintAllCommands()
                     "  restartmdns <commissioningMode> (disabled|enabled_basic|enabled_enhanced)   Start Mdns with given "
                     "settings. Usage: commissionee "
                     "restartmdns enabled_basic\r\n");
+    streamer_printf(sout, "  startbcm                   Start basic commissioning mode. Usage: commissionee startbcm\r\n");
     streamer_printf(sout, "\r\n");
 
     return CHIP_NO_ERROR;
@@ -84,7 +91,7 @@ static CHIP_ERROR CommissioneeHandler(int argc, char ** argv)
         return PrintAllCommands();
     }
 #if CHIP_DEVICE_CONFIG_ENABLE_COMMISSIONER_DISCOVERY_CLIENT
-    else if (strcmp(argv[0], "sendudc") == 0)
+    if (strcmp(argv[0], "sendudc") == 0)
     {
         char * eptr;
         chip::Inet::IPAddress commissioner;
@@ -93,6 +100,11 @@ static CHIP_ERROR CommissioneeHandler(int argc, char ** argv)
         return SendUDC(true, chip::Transport::PeerAddress::UDP(commissioner, port));
     }
 #endif // CHIP_DEVICE_CONFIG_ENABLE_COMMISSIONER_DISCOVERY_CLIENT
+    // TODO: Figure out whether setdiscoverytimeout is a reasonable thing to do
+    // at all, and if so what semantics it should have.  Presumably it should
+    // affect BLE discovery too, not just DNS-SD.  How should it interact with
+    // explicit timeouts specified in OpenCommissioningWindow?
+#if 0
     if (strcmp(argv[0], "setdiscoverytimeout") == 0)
     {
         char * eptr;
@@ -100,8 +112,9 @@ static CHIP_ERROR CommissioneeHandler(int argc, char ** argv)
         chip::app::DnssdServer::Instance().SetDiscoveryTimeoutSecs(timeout);
         return CHIP_NO_ERROR;
     }
+#endif
 #if CHIP_DEVICE_CONFIG_ENABLE_EXTENDED_DISCOVERY
-    else if (strcmp(argv[0], "setextendeddiscoverytimeout") == 0)
+    if (strcmp(argv[0], "setextendeddiscoverytimeout") == 0)
     {
         char * eptr;
         int16_t timeout = (int16_t) strtol(argv[1], &eptr, 10);
@@ -132,7 +145,11 @@ static CHIP_ERROR CommissioneeHandler(int argc, char ** argv)
         }
         return PrintAllCommands();
     }
-
+    if (strcmp(argv[0], "startbcm") == 0)
+    {
+        Server::GetInstance().GetCommissioningWindowManager().OpenBasicCommissioningWindow();
+        return CHIP_NO_ERROR;
+    }
     return CHIP_ERROR_INVALID_ARGUMENT;
 }
 

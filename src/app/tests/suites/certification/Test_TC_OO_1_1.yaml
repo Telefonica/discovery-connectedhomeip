@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: 3.1.1. [TC-OO-1] Global attributes with server as DUT
+name: 4.1.1. [TC-OO-1.1] Global attributes with server as DUT
+
+PICS:
+    - OO.S
 
 config:
     nodeId: 0x12344321
@@ -28,34 +31,31 @@ tests:
               - name: "nodeId"
                 value: nodeId
 
-    - label: "read the global attribute: ClusterRevision"
+    - label: "Read the global attribute: ClusterRevision"
       command: "readAttribute"
       attribute: "ClusterRevision"
       response:
           value: 4
-
-    - label: "Read the global attribute constraints: ClusterRevision"
-      command: "readAttribute"
-      attribute: "ClusterRevision"
-      response:
           constraints:
-              type: uint16
+              type: int16u
 
-    - label:
-          "write the default values to mandatory global attribute:
-          ClusterRevision"
-      command: "writeAttribute"
-      attribute: "ClusterRevision"
-      arguments:
-          value: 3
-      response:
-          error: UNSUPPORTED_WRITE
-
-    - label: "reads back global attribute: ClusterRevision"
+    - label: "Read the global attribute: FeatureMap"
       command: "readAttribute"
-      attribute: "ClusterRevision"
+      attribute: "FeatureMap"
+      PICS: OO.S.F00
       response:
-          value: 4
+          value: 1
+          constraints:
+              type: bitmap32
+
+    - label: "Read the global attribute: FeatureMap"
+      command: "readAttribute"
+      attribute: "FeatureMap"
+      PICS: " !OO.S.F00 "
+      response:
+          value: 0
+          constraints:
+              type: bitmap32
 
     - label: "Read the global attribute: AttributeList"
       command: "readAttribute"
@@ -63,55 +63,54 @@ tests:
       response:
           constraints:
               type: list
+              contains: [0, 65528, 65529, 65531, 65532, 65533]
 
-    #issue #11053 disabled steps below Global attributes missing from YAML framework
-    - label: "Read the global attribute: EventList"
-      disabled: true
+    - label: "Read the feature dependent(OO.S.F00) attribute in AttributeList"
+      PICS: OO.S.F00
       command: "readAttribute"
-      attribute: "EventList"
+      attribute: "AttributeList"
       response:
           constraints:
               type: list
+              contains: [16384, 16385, 16386, 16387]
 
     - label: "Read the global attribute: AcceptedCommandList"
-      disabled: true
       command: "readAttribute"
       attribute: "AcceptedCommandList"
       response:
           constraints:
               type: list
+              contains: [0, 1, 2]
 
-    - label: "Read the global attribute: GeneratedCommandList"
-      disabled: true
+    - label:
+          "Read the feature dependent(OO.S.F00) commands in AcceptedCommandList"
       command: "readAttribute"
-      attribute: "GeneratedCommandList"
+      attribute: "AcceptedCommandList"
+      PICS: OO.S.F00
       response:
           constraints:
               type: list
+              contains: [64, 65, 66]
 
-    - label: "read the optional global attribute: FeatureMap"
+    - label: "Read the global attribute: GeneratedCommandList"
       command: "readAttribute"
-      attribute: "FeatureMap"
+      attribute: "GeneratedCommandList"
       response:
-          value: 1
-
-    - label: "Read the optional global attribute : FeatureMap"
-      command: "readAttribute"
-      attribute: "FeatureMap"
-      response:
+          value: []
           constraints:
-              type: map32
-
-    - label: "write the default values to optional global attribute: FeatureMap"
-      command: "writeAttribute"
-      attribute: "FeatureMap"
-      arguments:
-          value: 0
-      response:
-          error: UNSUPPORTED_WRITE
-
-    - label: "reads back optional global attribute: FeatureMap"
-      command: "readAttribute"
-      attribute: "FeatureMap"
-      response:
-          value: 1
+              type: list
+    #Commenting out the step EventList attribute which is out of scope for matter V1.0
+    #- label:
+    #      "Read EventList attribute from the DUT and Verify that the DUT
+    #      response provides a list of supported events."
+    #  verification: |
+    #      Not implemented in chip-tool
+    #  cluster: "LogCommands"
+    #  command: "UserPrompt"
+    #  PICS: PICS_USER_PROMPT
+    #  arguments:
+    #      values:
+    #          - name: "message"
+    #            value: "Please enter 'y' for success"
+    #          - name: "expectedValue"
+    #            value: "y"

@@ -61,6 +61,56 @@ CHIP_ERROR ConfigurationManagerImpl::Init()
     CHIP_ERROR err;
     uint32_t rebootCount;
 
+#ifdef CONFIG_NVS_ENCRYPTION
+    nvs_sec_cfg_t cfg = {};
+    esp_err_t esp_err = ESP_FAIL;
+
+    const esp_partition_t * key_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, NULL);
+    if (key_part == NULL)
+    {
+        ChipLogError(DeviceLayer,
+                     "CONFIG_NVS_ENCRYPTION is enabled, but no partition with subtype nvs_keys found in the partition table.");
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+
+    esp_err = nvs_flash_read_security_cfg(key_part, &cfg);
+    if (esp_err == ESP_ERR_NVS_KEYS_NOT_INITIALIZED)
+    {
+        ChipLogError(DeviceLayer, "NVS key partition empty");
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+    else if (esp_err != ESP_OK)
+    {
+        ChipLogError(DeviceLayer, "Failed to read NVS security cfg, err:0x%02x", esp_err);
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+
+    // Securely initialize the nvs partitions,
+    // nvs_flash_secure_init_partition() will initialize the partition only if it is not already initialized.
+    esp_err = nvs_flash_secure_init_partition(CHIP_DEVICE_CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION, &cfg);
+    if (esp_err == ESP_ERR_NVS_NO_FREE_PAGES || esp_err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ChipLogError(DeviceLayer, "Failed to initialize NVS partition %s err:0x%02x",
+                     CHIP_DEVICE_CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION, esp_err);
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+
+    esp_err = nvs_flash_secure_init_partition(CHIP_DEVICE_CONFIG_CHIP_CONFIG_NAMESPACE_PARTITION, &cfg);
+    if (esp_err == ESP_ERR_NVS_NO_FREE_PAGES || esp_err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ChipLogError(DeviceLayer, "Failed to initialize NVS partition %s err:0x%02x",
+                     CHIP_DEVICE_CONFIG_CHIP_CONFIG_NAMESPACE_PARTITION, esp_err);
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+
+    esp_err = nvs_flash_secure_init_partition(CHIP_DEVICE_CONFIG_CHIP_COUNTERS_NAMESPACE_PARTITION, &cfg);
+    if (esp_err == ESP_ERR_NVS_NO_FREE_PAGES || esp_err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ChipLogError(DeviceLayer, "Failed to initialize NVS partition %s err:0x%02x",
+                     CHIP_DEVICE_CONFIG_CHIP_COUNTERS_NAMESPACE_PARTITION, esp_err);
+        SuccessOrExit(MapConfigError(esp_err));
+    }
+#else
     // Initialize the nvs partitions,
     // nvs_flash_init_partition() will initialize the partition only if it is not already initialized.
     esp_err_t esp_err = nvs_flash_init_partition(CHIP_DEVICE_CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION);
@@ -69,6 +119,9 @@ CHIP_ERROR ConfigurationManagerImpl::Init()
     SuccessOrExit(MapConfigError(esp_err));
     esp_err = nvs_flash_init_partition(CHIP_DEVICE_CONFIG_CHIP_COUNTERS_NAMESPACE_PARTITION);
     SuccessOrExit(MapConfigError(esp_err));
+    esp_err = nvs_flash_init_partition(CHIP_DEVICE_CONFIG_CHIP_KVS_NAMESPACE_PARTITION);
+    SuccessOrExit(MapConfigError(esp_err));
+#endif
 
     // Force initialization of NVS namespaces if they doesn't already exist.
     err = ESP32Config::EnsureNamespace(ESP32Config::kConfigNamespace_ChipFactory);
@@ -105,21 +158,6 @@ CHIP_ERROR ConfigurationManagerImpl::Init()
 
     // TODO: Initialize the global GroupKeyStore object here (#1266)
 
-#if CHIP_DEVICE_CONFIG_ENABLE_FACTORY_PROVISIONING
-
-    {
-        FactoryProvisioning factoryProv;
-        uint8_t * const kInternalSRAM12Start = (uint8_t *) 0x3FFAE000;
-        uint8_t * const kInternalSRAM12End   = kInternalSRAM12Start + (328 * 1024) - 1;
-
-        // Scan ESP32 Internal SRAM regions 1 and 2 for injected provisioning data and save
-        // to persistent storage if found.
-        err = factoryProv.ProvisionDeviceFromRAM(kInternalSRAM12Start, kInternalSRAM12End);
-        SuccessOrExit(err);
-    }
-
-#endif // CHIP_DEVICE_CONFIG_ENABLE_FACTORY_PROVISIONING
-
     err = CHIP_NO_ERROR;
 
 exit:
@@ -144,6 +182,26 @@ CHIP_ERROR ConfigurationManagerImpl::GetTotalOperationalHours(uint32_t & totalOp
 CHIP_ERROR ConfigurationManagerImpl::StoreTotalOperationalHours(uint32_t totalOperationalHours)
 {
     return WriteConfigValue(ESP32Config::kCounterKey_TotalOperationalHours, totalOperationalHours);
+}
+
+CHIP_ERROR ConfigurationManagerImpl::GetProductURL(char * buf, size_t bufSize)
+{
+    CHIP_ERROR err = ReadConfigValueStr(ESP32Config::kConfigKey_ProductURL, buf, bufSize, bufSize);
+    if (err == CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)
+    {
+        return CHIP_DEVICE_ERROR_CONFIG_NOT_FOUND;
+    }
+    return err;
+}
+
+CHIP_ERROR ConfigurationManagerImpl::GetProductLabel(char * buf, size_t bufSize)
+{
+    CHIP_ERROR err = ReadConfigValueStr(ESP32Config::kConfigKey_ProductLabel, buf, bufSize, bufSize);
+    if (err == CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)
+    {
+        return CHIP_DEVICE_ERROR_CONFIG_NOT_FOUND;
+    }
+    return err;
 }
 
 CHIP_ERROR ConfigurationManagerImpl::GetPrimaryWiFiMACAddress(uint8_t * buf)
@@ -299,6 +357,11 @@ void ConfigurationManagerImpl::DoFactoryReset(intptr_t arg)
     // Restart the system.
     ChipLogProgress(DeviceLayer, "System restarting");
     esp_restart();
+}
+
+ConfigurationManager & ConfigurationMgrImpl()
+{
+    return ConfigurationManagerImpl::GetDefaultInstance();
 }
 
 } // namespace DeviceLayer

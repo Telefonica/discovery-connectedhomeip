@@ -83,7 +83,7 @@ public:
                     EndpointId endpoint_id = emberAfEndpointFromIndex(index);
                     if (endpoint_id == 0)
                         continue;
-                    chip_rpc_Endpoint out{ endpoint : endpoint_id };
+                    chip_rpc_Endpoint out{ .endpoint = endpoint_id };
                     writer.Write(out);
                 }
             }
@@ -94,12 +94,12 @@ public:
 private:
     void ClusterList(EndpointId endpoint, bool server, ServerWriter<::chip_rpc_Cluster> & writer)
     {
-        uint16_t cluster_count = emberAfClusterCount(endpoint, server);
+        uint8_t cluster_count = emberAfClusterCount(endpoint, server);
 
         for (uint8_t cluster_index = 0; cluster_index < cluster_count; cluster_index++)
         {
             const EmberAfCluster * cluster = emberAfGetNthCluster(endpoint, cluster_index, server);
-            chip_rpc_Cluster out{ cluster_id : cluster->clusterId };
+            chip_rpc_Cluster out{ .cluster_id = cluster->clusterId };
             writer.Write(out);
         }
         writer.Finish();

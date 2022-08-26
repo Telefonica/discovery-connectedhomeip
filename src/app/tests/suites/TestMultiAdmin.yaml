@@ -17,26 +17,32 @@ name: Test Multi Admin
 config:
     nodeId: 0x12344321
     nodeIdForDuplicateCommissioning:
-        type: NODE_ID
+        type: node_id
         defaultValue: 0x11
     nodeId2:
-        type: NODE_ID
+        type: node_id
         defaultValue: 0xCAFE
     nodeId3:
-        type: NODE_ID
+        type: node_id
         defaultValue: 0xC00FEE
     endpoint: 0
     discriminator:
-        type: INT16U
+        type: int16u
         defaultValue: 3840
     payload:
-        type: CHAR_STRING
+        type: char_string
         defaultValue: "MT:-24J0AFN00KA0648G00" # This value needs to be generated automatically
 
 tests:
-    - label: "Reboot target device"
+    - label: "Stop target device"
       cluster: "SystemCommands"
-      command: "Reboot"
+      command: "Stop"
+
+    - label:
+          "Start target device with the provided discriminator for basic
+          commissioning advertisement"
+      cluster: "SystemCommands"
+      command: "Start"
       arguments:
           values:
               - name: "discriminator"
@@ -53,7 +59,7 @@ tests:
     - label: "Commission from alpha when the commissioning window is not opened"
       identity: "alpha"
       cluster: "CommissionerCommands"
-      command: "PairWithQRCode"
+      command: "PairWithCode"
       arguments:
           values:
               - name: "nodeId"
@@ -75,7 +81,7 @@ tests:
     - label: "Commission from alpha again"
       identity: "alpha"
       cluster: "CommissionerCommands"
-      command: "PairWithQRCode"
+      command: "PairWithCode"
       arguments:
           values:
               - name: "nodeId"
@@ -84,7 +90,6 @@ tests:
                 value: payload
       response:
           error: FAILURE
-          clusterError: 0x09 #OperationalCertStatus::kFabricConflict
 
     - label: "Check that we just have the one fabric and did not add a new one"
       identity: "alpha"
@@ -112,7 +117,7 @@ tests:
     - label: "Commission from beta"
       identity: "beta"
       cluster: "CommissionerCommands"
-      command: "PairWithQRCode"
+      command: "PairWithCode"
       arguments:
           values:
               - name: "nodeId"
@@ -142,7 +147,7 @@ tests:
     - label: "Commission from gamma"
       identity: "gamma"
       cluster: "CommissionerCommands"
-      command: "PairWithQRCode"
+      command: "PairWithCode"
       arguments:
           values:
               - name: "nodeId"

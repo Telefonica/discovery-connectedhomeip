@@ -88,12 +88,12 @@ public:
     const chip::ByteSpan GetMac() const { return chip::ByteSpan(mMacStorage, mMacLength); }
 
     // Common Flags
-    Derived & SetMRPConfig(const ReliableMessageProtocolConfig & config)
+    Derived & SetLocalMRPConfig(const Optional<ReliableMessageProtocolConfig> & config)
     {
-        mMRPConfig.SetValue(config);
+        mLocalMRPConfig = config;
         return *reinterpret_cast<Derived *>(this);
     }
-    const Optional<ReliableMessageProtocolConfig> & GetMRPConfig() const { return mMRPConfig; }
+    const Optional<ReliableMessageProtocolConfig> & GetLocalMRPConfig() const { return mLocalMRPConfig; }
     Derived & SetTcpSupported(Optional<bool> tcpSupported)
     {
         mTcpSupported = tcpSupported;
@@ -107,7 +107,7 @@ private:
     bool mEnableIPv4                 = true;
     uint8_t mMacStorage[kMaxMacSize] = {};
     size_t mMacLength                = 0;
-    Optional<ReliableMessageProtocolConfig> mMRPConfig;
+    Optional<ReliableMessageProtocolConfig> mLocalMRPConfig;
     Optional<bool> mTcpSupported;
 };
 
@@ -333,7 +333,14 @@ public:
     /**
      * Returns the commissionable node service instance name formatted as hex string.
      */
-    virtual CHIP_ERROR GetCommissionableInstanceName(char * instanceName, size_t maxLength) = 0;
+    virtual CHIP_ERROR GetCommissionableInstanceName(char * instanceName, size_t maxLength) const = 0;
+
+    /**
+     * Generates an updated commissionable instance name.  This happens
+     * automatically when Init() is called, but may be needed at other times as
+     * well.
+     */
+    virtual CHIP_ERROR UpdateCommissionableInstanceName() = 0;
 
     /// Provides the system-wide implementation of the service advertiser
     static ServiceAdvertiser & Instance();

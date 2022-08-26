@@ -17,9 +17,7 @@
 
 #pragma once
 
-#if CONFIG_NETWORK_LAYER_BLE
-#include <ble/BleLayer.h>
-#endif
+#include <credentials/CertificateValidityPolicy.h>
 #include <credentials/GroupDataProvider.h>
 #include <messaging/ExchangeDelegate.h>
 #include <messaging/ExchangeMgr.h>
@@ -33,25 +31,34 @@ class CASEServer : public SessionEstablishmentDelegate,
 {
 public:
     CASEServer() {}
-    ~CASEServer() override
+    ~CASEServer() override { Shutdown(); }
+
+    /*
+     * This method will shutdown this object, releasing the strong reference to the pinned SecureSession object.
+     * It will also unregister the unsolicited handler and clear out the session object (which will release the weak
+     * reference through the underlying SessionHolder).
+     *
+     */
+    void Shutdown()
     {
         if (mExchangeManager != nullptr)
         {
             mExchangeManager->UnregisterUnsolicitedMessageHandlerForType(Protocols::SecureChannel::MsgType::CASE_Sigma1);
+            mExchangeManager = nullptr;
         }
+
+        GetSession().Clear();
+        mPinnedSecureSession.ClearValue();
     }
 
-    CHIP_ERROR ListenForSessionEstablishment(Messaging::ExchangeManager * exchangeManager, TransportMgrBase * transportMgr,
-#if CONFIG_NETWORK_LAYER_BLE
-                                             Ble::BleLayer * bleLayer,
-#endif
-                                             SessionManager * sessionManager, FabricTable * fabrics,
-                                             SessionResumptionStorage * sessionResumptionStorage,
+    CHIP_ERROR ListenForSessionEstablishment(Messaging::ExchangeManager * exchangeManager, SessionManager * sessionManager,
+                                             FabricTable * fabrics, SessionResumptionStorage * sessionResumptionStorage,
+                                             Credentials::CertificateValidityPolicy * policy,
                                              Credentials::GroupDataProvider * responderGroupDataProvider);
 
     //////////// SessionEstablishmentDelegate Implementation ///////////////
     void OnSessionEstablishmentError(CHIP_ERROR error) override;
-    void OnSessionEstablished() override;
+    void OnSessionEstablished(const SessionHandle & session) override;
 
     //// UnsolicitedMessageHandler Implementation ////
     CHIP_ERROR OnUnsolicitedMessageReceived(const PayloadHeader & payloadHeader, ExchangeDelegate *& newDelegate) override;
@@ -65,21 +72,41 @@ public:
     virtual CASESession & GetSession() { return mPairingSession; }
 
 private:
-    Messaging::ExchangeManager * mExchangeManager        = nullptr;
-    SessionResumptionStorage * mSessionResumptionStorage = nullptr;
+    Messaging::ExchangeManager * mExchangeManager                       = nullptr;
+    SessionResumptionStorage * mSessionResumptionStorage                = nullptr;
+    Credentials::CertificateValidityPolicy * mCertificateValidityPolicy = nullptr;
+
+    //
+    // When we're in the process of establishing a session, this is used
+    // to maintain an additional, strong reference to the underlying SecureSession.
+    // This is because the existing reference in PairingSession is a weak one
+    // (i.e a SessionHolder) and can lose its reference if the session is evicted
+    // for any reason.
+    //
+    // This initially points to a session that is not yet active. Upon activation, it
+    // transfers ownership of the session to the SecureSessionManager and this reference
+    // is released before simultaneously acquiring ownership of a new SecureSession.
+    //
+    Optional<SessionHandle> mPinnedSecureSession;
 
     CASESession mPairingSession;
     SessionManager * mSessionManager = nullptr;
-#if CONFIG_NETWORK_LAYER_BLE
-    Ble::BleLayer * mBleLayer = nullptr;
-#endif
 
     FabricTable * mFabrics                              = nullptr;
     Credentials::GroupDataProvider * mGroupDataProvider = nullptr;
 
     CHIP_ERROR InitCASEHandshake(Messaging::ExchangeContext * ec);
 
-    void Cleanup();
+    /*
+     * This will clean up any state from a previous session establishment
+     * attempt (if any) and setup the machinery to listen for and handle
+     * any session handshakes there-after.
+     *
+     * If a session had previously been established successfully, previouslyEstablishedPeer
+     * should be set to the scoped node-id of the peer associated with that session.
+     *
+     */
+    void PrepareForSessionEstablishment(const ScopedNodeId & previouslyEstablishedPeer = ScopedNodeId());
 };
 
 } // namespace chip

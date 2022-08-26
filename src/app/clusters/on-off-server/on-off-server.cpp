@@ -86,6 +86,20 @@ bool OnOffServer::HasFeature(chip::EndpointId endpoint, OnOffFeature feature)
     return success ? ((featureMap & to_underlying(feature)) != 0) : false;
 }
 
+EmberAfStatus OnOffServer::getOnOffValue(chip::EndpointId endpoint, bool * currentOnOffValue)
+{
+    // read current on/off value
+    EmberAfStatus status = Attributes::OnOff::Get(endpoint, currentOnOffValue);
+    if (status != EMBER_ZCL_STATUS_SUCCESS)
+    {
+        emberAfOnOffClusterPrintln("ERR: reading on/off %x", status);
+    }
+
+    emberAfOnOffClusterPrintln("On/Off ep%d value: %d", endpoint, *currentOnOffValue);
+
+    return status;
+}
+
 /** @brief On/off Cluster Set Value
  *
  * This function is called when the on/off value needs to be set, either through
@@ -170,7 +184,7 @@ EmberAfStatus OnOffServer::setOnOffValue(chip::EndpointId endpoint, uint8_t comm
 #ifdef EMBER_AF_PLUGIN_MODE_SELECT
         // If OnMode is not a null value, then change the current mode to it.
         if (emberAfContainsServer(endpoint, ModeSelect::Id) &&
-            emberAfContainsAttribute(endpoint, ModeSelect::Id, ModeSelect::Attributes::OnMode::Id, true))
+            emberAfContainsAttribute(endpoint, ModeSelect::Id, ModeSelect::Attributes::OnMode::Id))
         {
             ModeSelect::Attributes::OnMode::TypeInfo::Type onMode;
             if (ModeSelect::Attributes::OnMode::Get(endpoint, onMode) == EMBER_ZCL_STATUS_SUCCESS && !onMode.IsNull())
@@ -256,7 +270,7 @@ void OnOffServer::initOnOffServer(chip::EndpointId endpoint)
 #ifdef EMBER_AF_PLUGIN_MODE_SELECT
         // If OnMode is not a null value, then change the current mode to it.
         if (onOffValueForStartUp && emberAfContainsServer(endpoint, ModeSelect::Id) &&
-            emberAfContainsAttribute(endpoint, ModeSelect::Id, ModeSelect::Attributes::OnMode::Id, true))
+            emberAfContainsAttribute(endpoint, ModeSelect::Id, ModeSelect::Attributes::OnMode::Id))
         {
             ModeSelect::Attributes::OnMode::TypeInfo::Type onMode;
             if (ModeSelect::Attributes::OnMode::Get(endpoint, onMode) == EMBER_ZCL_STATUS_SUCCESS && !onMode.IsNull())
@@ -369,13 +383,7 @@ bool OnOffServer::offWithEffectCommand(app::CommandHandler * commandObj, const a
 #endif // EMBER_AF_PLUGIN_SCENES
 
             OnOff::Attributes::GlobalSceneControl::Set(endpoint, false);
-
-            status = setOnOffValue(endpoint, Commands::Off::Id, false);
             Attributes::OnTime::Set(endpoint, 0);
-        }
-        else
-        {
-            status = setOnOffValue(endpoint, Commands::Off::Id, false);
         }
 
         // Only apply effect if OnOff is on
@@ -391,6 +399,8 @@ bool OnOffServer::offWithEffectCommand(app::CommandHandler * commandObj, const a
                 effect->mOffWithEffectTrigger(effect);
             }
         }
+
+        status = setOnOffValue(endpoint, Commands::Off::Id, false);
     }
     else
     {
@@ -440,6 +450,26 @@ bool OnOffServer::OnWithRecallGlobalSceneCommand(app::CommandHandler * commandOb
 
     emberAfSendImmediateDefaultResponse(status);
     return true;
+}
+
+uint32_t OnOffServer::calculateNextWaitTimeMS(void)
+{
+    const chip::System::Clock::Timestamp currentTime = chip::System::SystemClock().GetMonotonicTimestamp();
+    chip::System::Clock::Timestamp waitTime          = UPDATE_TIME_MS;
+    chip::System::Clock::Timestamp latency;
+
+    if (currentTime > nextDesiredOnWithTimedOffTimestamp)
+    {
+        latency = currentTime - nextDesiredOnWithTimedOffTimestamp;
+        if (latency >= UPDATE_TIME_MS)
+            waitTime = chip::System::Clock::Milliseconds32(1);
+        else
+            waitTime -= latency;
+    }
+
+    nextDesiredOnWithTimedOffTimestamp += UPDATE_TIME_MS;
+
+    return (uint32_t) waitTime.count();
 }
 
 bool OnOffServer::OnWithTimedOffCommand(const app::ConcreteCommandPath & commandPath,
@@ -493,7 +523,8 @@ bool OnOffServer::OnWithTimedOffCommand(const app::ConcreteCommandPath & command
 
     if (currentOnTime < MAX_TIME_VALUE && currentOffWaitTime < MAX_TIME_VALUE)
     {
-        emberEventControlSetDelayMS(configureEventControl(endpoint), UPDATE_TIME_MS);
+        nextDesiredOnWithTimedOffTimestamp = chip::System::SystemClock().GetMonotonicTimestamp() + UPDATE_TIME_MS;
+        emberEventControlSetDelayMS(configureEventControl(endpoint), (uint32_t) UPDATE_TIME_MS.count());
     }
 
 exit:
@@ -516,7 +547,7 @@ void OnOffServer::updateOnOffTimeCommand(chip::EndpointId endpoint)
     if (isOn) // OnOff On case
     {
         // Restart Timer
-        emberEventControlSetDelayMS(configureEventControl(endpoint), UPDATE_TIME_MS);
+        emberEventControlSetDelayMS(configureEventControl(endpoint), calculateNextWaitTimeMS());
 
         // Update onTime values
         uint16_t onTime = MIN_TIME_VALUE;
@@ -555,7 +586,7 @@ void OnOffServer::updateOnOffTimeCommand(chip::EndpointId endpoint)
         if (offWaitTime > 0)
         {
             // Restart Timer
-            emberEventControlSetDelayMS(configureEventControl(endpoint), UPDATE_TIME_MS);
+            emberEventControlSetDelayMS(configureEventControl(endpoint), calculateNextWaitTimeMS());
         }
         else
         {
@@ -570,12 +601,8 @@ void OnOffServer::updateOnOffTimeCommand(chip::EndpointId endpoint)
 #ifndef IGNORE_ON_OFF_CLUSTER_START_UP_ON_OFF
 bool OnOffServer::areStartUpOnOffServerAttributesNonVolatile(EndpointId endpoint)
 {
-    if (emberAfIsNonVolatileAttribute(endpoint, OnOff::Id, Attributes::OnOff::Id, true))
-    {
-        return emberAfIsNonVolatileAttribute(endpoint, OnOff::Id, Attributes::StartUpOnOff::Id, true);
-    }
-
-    return false;
+    return !emberAfIsKnownVolatileAttribute(endpoint, OnOff::Id, Attributes::OnOff::Id) &&
+        !emberAfIsKnownVolatileAttribute(endpoint, OnOff::Id, Attributes::StartUpOnOff::Id);
 }
 #endif // IGNORE_ON_OFF_CLUSTER_START_UP_ON_OFF
 

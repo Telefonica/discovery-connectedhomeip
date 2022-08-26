@@ -26,48 +26,32 @@ namespace chip {
 
 class CASEClient;
 
-typedef void (*OnCASEConnected)(void * context, CASEClient * client);
-typedef void (*OnCASEConnectionFailure)(void * context, CASEClient * client, CHIP_ERROR error);
-
 struct CASEClientInitParams
 {
-    SessionManager * sessionManager                     = nullptr;
-    SessionResumptionStorage * sessionResumptionStorage = nullptr;
-    Messaging::ExchangeManager * exchangeMgr            = nullptr;
-    FabricInfo * fabricInfo                             = nullptr;
-    Credentials::GroupDataProvider * groupDataProvider  = nullptr;
+    SessionManager * sessionManager                                    = nullptr;
+    SessionResumptionStorage * sessionResumptionStorage                = nullptr;
+    Credentials::CertificateValidityPolicy * certificateValidityPolicy = nullptr;
+    Messaging::ExchangeManager * exchangeMgr                           = nullptr;
+    FabricTable * fabricTable                                          = nullptr;
+    Credentials::GroupDataProvider * groupDataProvider                 = nullptr;
 
     Optional<ReliableMessageProtocolConfig> mrpLocalConfig = Optional<ReliableMessageProtocolConfig>::Missing();
 };
 
-class DLL_EXPORT CASEClient : public SessionEstablishmentDelegate
+class DLL_EXPORT CASEClient
 {
 public:
     CASEClient(const CASEClientInitParams & params);
 
-    void SetMRPIntervals(const ReliableMessageProtocolConfig & mrpConfig);
+    void SetRemoteMRPIntervals(const ReliableMessageProtocolConfig & remoteMRPConfig);
 
-    CHIP_ERROR EstablishSession(PeerId peer, const Transport::PeerAddress & peerAddress,
-                                const ReliableMessageProtocolConfig & mrpConfig, OnCASEConnected onConnection,
-                                OnCASEConnectionFailure onFailure, void * context);
-
-    // Implementation of SessionEstablishmentDelegate
-    void OnSessionEstablishmentError(CHIP_ERROR error) override;
-
-    void OnSessionEstablished() override;
-
-    CHIP_ERROR DeriveSecureSessionHandle(SessionHolder & handle);
+    CHIP_ERROR EstablishSession(const ScopedNodeId & peer, const Transport::PeerAddress & peerAddress,
+                                const ReliableMessageProtocolConfig & remoteMRPConfig, SessionEstablishmentDelegate * delegate);
 
 private:
     CASEClientInitParams mInitParams;
 
     CASESession mCASESession;
-    PeerId mPeerId;
-    Transport::PeerAddress mPeerAddress;
-
-    OnCASEConnected mConnectionSuccessCallback         = nullptr;
-    OnCASEConnectionFailure mConnectionFailureCallback = nullptr;
-    void * mConectionContext                           = nullptr;
 };
 
 } // namespace chip

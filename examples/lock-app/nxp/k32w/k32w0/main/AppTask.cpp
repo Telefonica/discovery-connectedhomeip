@@ -28,6 +28,8 @@
 #include <platform/CHIPDeviceLayer.h>
 #include <platform/internal/DeviceNetworkInfo.h>
 
+#include <inet/EndPointStateOpenThread.h>
+
 #include <app-common/zap-generated/attribute-id.h>
 #include <app-common/zap-generated/attribute-type.h>
 #include <app-common/zap-generated/cluster-id.h>
@@ -37,6 +39,13 @@
 #include "LED.h"
 #include "LEDWidget.h"
 #include "app_config.h"
+
+#if CHIP_CRYPTO_HSM
+#include <crypto/hsm/CHIPCryptoPALHsm.h>
+#endif
+#ifdef ENABLE_HSM_DEVICE_ATTESTATION
+#include "DeviceAttestationSe05xCredsExample.h"
+#endif
 
 constexpr uint32_t kFactoryResetTriggerTimeout = 6000;
 constexpr uint8_t kAppEventQueueSize           = 10;
@@ -87,7 +96,11 @@ CHIP_ERROR AppTask::Init()
     PlatformMgr().ScheduleWork(InitServer, 0);
 
     // Initialize device attestation config
+#ifdef ENABLE_HSM_DEVICE_ATTESTATION
+    SetDeviceAttestationCredentialsProvider(Examples::GetExampleSe05xDACProvider());
+#else
     SetDeviceAttestationCredentialsProvider(Examples::GetExampleDACProvider());
+#endif
 
     // QR code will be used with CHIP Tool
     PrintOnboardingCodes(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kBLE));
@@ -151,12 +164,29 @@ CHIP_ERROR AppTask::Init()
     return err;
 }
 
+void LockOpenThreadTask(void)
+{
+    PWR_DisallowDeviceToSleep();
+    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
+}
+
+void UnlockOpenThreadTask(void)
+{
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+    PWR_AllowDeviceToSleep();
+}
+
 void AppTask::InitServer(intptr_t arg)
 {
     static chip::CommonCaseDeviceServerInitParams initParams;
     (void) initParams.InitializeStaticResourcesBeforeServerInit();
 
     // Init ZCL Data Model and start server
+    chip::Inet::EndPointStateOpenThread::OpenThreadEndpointInitParam nativeParams;
+    nativeParams.lockCb                = LockOpenThreadTask;
+    nativeParams.unlockCb              = UnlockOpenThreadTask;
+    nativeParams.openThreadInstancePtr = chip::DeviceLayer::ThreadStackMgrImpl().OTInstance();
+    initParams.endpointNativeParams    = static_cast<void *>(&nativeParams);
     VerifyOrDie((chip::Server::GetInstance().Init(initParams)) == CHIP_NO_ERROR);
 }
 
@@ -700,9 +730,10 @@ void AppTask::DispatchEvent(AppEvent * aEvent)
     {
         aEvent->Handler(aEvent->param);
     }
+    else
 #endif
 
-    if (aEvent->Handler)
+        if (aEvent->Handler)
     {
         aEvent->Handler(aEvent);
     }
@@ -721,10 +752,12 @@ void AppTask::UpdateClusterStateInternal(intptr_t arg)
     uint8_t newValue = !BoltLockMgr().IsUnlocked();
 
     // write the new on/off value
-    EmberAfStatus status = emberAfWriteAttribute(1, ZCL_ON_OFF_CLUSTER_ID, ZCL_ON_OFF_ATTRIBUTE_ID, CLUSTER_MASK_SERVER,
-                                                 (uint8_t *) &newValue, ZCL_BOOLEAN_ATTRIBUTE_TYPE);
+    EmberAfStatus status =
+        emberAfWriteAttribute(1, ZCL_ON_OFF_CLUSTER_ID, ZCL_ON_OFF_ATTRIBUTE_ID, (uint8_t *) &newValue, ZCL_BOOLEAN_ATTRIBUTE_TYPE);
     if (status != EMBER_ZCL_STATUS_SUCCESS)
     {
         ChipLogError(NotSpecified, "ERR: updating on/off %x", status);
     }
 }
+
+extern "C" void OTAIdleActivities(void) {}

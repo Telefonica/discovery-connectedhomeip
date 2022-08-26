@@ -67,7 +67,6 @@ CHIP_ERROR ConfigurationManagerImpl::Init()
     // Initialize the generic implementation base class.
     err = Internal::GenericConfigurationManagerImpl<CC13X2_26X2Config>::Init();
 
-exit:
     return err;
 }
 
@@ -183,6 +182,11 @@ void ConfigurationManagerImpl::DoFactoryReset(intptr_t arg)
     ChipLogProgress(DeviceLayer, "System restarting");
     // There should probably be an OS API for this
     SysCtrlSystemReset();
+}
+
+ConfigurationManager & ConfigurationMgrImpl()
+{
+    return ConfigurationManagerImpl::GetDefaultInstance();
 }
 
 } // namespace DeviceLayer

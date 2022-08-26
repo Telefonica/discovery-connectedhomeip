@@ -23,6 +23,8 @@
 #include <stdint.h>
 
 #include <app/util/basic-types.h>
+#include <lib/core/GroupId.h>
+#include <lib/core/NodeId.h>
 #include <lib/support/Span.h>
 #include <protocols/interaction_model/Constants.h>
 
@@ -51,7 +53,7 @@ typedef struct _TestFabricScoped
     chip::CharSpan fabricSensitiveCharString;
     SimpleStruct fabricSensitiveStruct;
     /* TYPE WARNING: array array defaults to */ uint8_t * fabricSensitiveInt8uList;
-    chip::FabricIndex fabricIndex;
+    chip::FabricIndex FabricIndex;
 } TestFabricScoped;
 
 // Struct for Dimension
@@ -93,6 +95,35 @@ typedef struct _NestedStruct
     bool b;
     SimpleStruct c;
 } NestedStruct;
+
+// Struct for SemanticTag
+typedef struct _SemanticTag
+{
+    uint16_t MfgCode;
+    uint16_t Value;
+} SemanticTag;
+
+// Struct for ModeOptionStruct
+typedef struct _ModeOptionStruct
+{
+    chip::CharSpan Label;
+    uint8_t Mode;
+    /* TYPE WARNING: array array defaults to */ uint8_t * SemanticTags;
+} ModeOptionStruct;
+
+// Struct for AttributeValuePair
+typedef struct _AttributeValuePair
+{
+    chip::AttributeId AttributeId;
+    /* TYPE WARNING: array array defaults to */ uint8_t * AttributeValue;
+} AttributeValuePair;
+
+// Struct for ExtensionFieldSet
+typedef struct _ExtensionFieldSet
+{
+    chip::ClusterId ClusterId;
+    /* TYPE WARNING: array array defaults to */ uint8_t * AttributeValueList;
+} ExtensionFieldSet;
 
 // Struct for NestedStructList
 typedef struct _NestedStructList
@@ -185,7 +216,7 @@ typedef struct _ActionStruct
     uint8_t Type;
     uint16_t EndpointListID;
     uint16_t SupportedCommands;
-    uint8_t Status;
+    uint8_t State;
 } ActionStruct;
 
 // Struct for ApplicationBasicApplication
@@ -199,6 +230,7 @@ typedef struct _ApplicationBasicApplication
 typedef struct _BasicCommissioningInfo
 {
     uint16_t FailSafeExpiryLengthSeconds;
+    uint16_t MaxCumulativeFailsafeSeconds;
 } BasicCommissioningInfo;
 
 // Struct for BatChargeFaultChangeType
@@ -246,6 +278,14 @@ typedef struct _DlCredential
     uint16_t CredentialIndex;
 } DlCredential;
 
+// Struct for DstOffsetType
+typedef struct _DstOffsetType
+{
+    int32_t Offset;
+    uint64_t ValidStarting;
+    uint64_t ValidUntil;
+} DstOffsetType;
+
 // Struct for EndpointListStruct
 typedef struct _EndpointListStruct
 {
@@ -266,7 +306,7 @@ typedef struct _ExtensionEntry
 typedef struct _FabricDescriptor
 {
     chip::ByteSpan RootPublicKey;
-    uint16_t VendorId;
+    chip::VendorId VendorId;
     chip::FabricId FabricId;
     chip::NodeId NodeId;
     chip::CharSpan Label;
@@ -303,13 +343,6 @@ typedef struct _GroupKeySetStruct
     uint64_t EpochStartTime2;
 } GroupKeySetStruct;
 
-// Struct for IasAceZoneStatusResult
-typedef struct _IasAceZoneStatusResult
-{
-    uint8_t zoneId;
-    uint16_t zoneStatus;
-} IasAceZoneStatusResult;
-
 // Struct for InputInfo
 typedef struct _InputInfo
 {
@@ -334,14 +367,6 @@ typedef struct _LineupInfo
     chip::CharSpan postalCode;
     uint8_t lineupInfoType;
 } LineupInfo;
-
-// Struct for ModeOptionStruct
-typedef struct _ModeOptionStruct
-{
-    chip::CharSpan Label;
-    uint8_t Mode;
-    uint32_t SemanticTag;
-} ModeOptionStruct;
 
 // Struct for NOCStruct
 typedef struct _NOCStruct
@@ -429,15 +454,6 @@ typedef struct _PlaybackPosition
     uint64_t position;
 } PlaybackPosition;
 
-// Struct for PowerProfileRecord
-typedef struct _PowerProfileRecord
-{
-    uint8_t powerProfileId;
-    uint8_t energyPhaseId;
-    bool powerProfileRemoteControl;
-    uint8_t powerProfileState;
-} PowerProfileRecord;
-
 // Struct for ProviderLocation
 typedef struct _ProviderLocation
 {
@@ -450,7 +466,7 @@ typedef struct _ProviderLocation
 typedef struct _ReadAttributeStatusRecord
 {
     chip::AttributeId attributeId;
-    chip::Protocols::InteractionModel::Status status;
+    uint8_t status;
     uint8_t attributeType;
     uint8_t * attributeLocation;
 } ReadAttributeStatusRecord;
@@ -478,49 +494,12 @@ typedef struct _RouteTable
     bool LinkEstablished;
 } RouteTable;
 
-// Struct for SceneExtensionAttributeInfo
-typedef struct _SceneExtensionAttributeInfo
-{
-    uint8_t attributeType;
-    uint8_t * attributeLocation;
-} SceneExtensionAttributeInfo;
-
-// Struct for SceneExtensionFieldSet
-typedef struct _SceneExtensionFieldSet
-{
-    chip::ClusterId clusterId;
-    uint8_t length;
-    uint8_t value;
-} SceneExtensionFieldSet;
-
-// Struct for ScheduledPhase
-typedef struct _ScheduledPhase
-{
-    uint8_t energyPhaseId;
-    uint16_t scheduledTime;
-} ScheduledPhase;
-
 // Struct for SecurityPolicy
 typedef struct _SecurityPolicy
 {
     uint16_t RotationTime;
     uint16_t Flags;
 } SecurityPolicy;
-
-// Struct for SemanticTag
-typedef struct _SemanticTag
-{
-    uint16_t MfgCode;
-    uint16_t Value;
-} SemanticTag;
-
-// Struct for SoftwareFaultStruct
-typedef struct _SoftwareFaultStruct
-{
-    uint64_t Id;
-    chip::CharSpan Name;
-    chip::ByteSpan FaultRecording;
-} SoftwareFaultStruct;
 
 // Struct for TargetInfo
 typedef struct _TargetInfo
@@ -542,9 +521,17 @@ typedef struct _TargetStruct
 // Struct for TestListStructOctet
 typedef struct _TestListStructOctet
 {
-    uint64_t fabricIndex;
-    chip::ByteSpan operationalCert;
+    uint64_t member1;
+    chip::ByteSpan member2;
 } TestListStructOctet;
+
+// Struct for ThermostatScheduleTransition
+typedef struct _ThermostatScheduleTransition
+{
+    uint16_t TransitionTime;
+    int16_t HeatSetpoint;
+    int16_t CoolSetpoint;
+} ThermostatScheduleTransition;
 
 // Struct for ThreadInterfaceScanResult
 typedef struct _ThreadInterfaceScanResult
@@ -569,16 +556,13 @@ typedef struct _ThreadMetrics
     uint32_t StackSize;
 } ThreadMetrics;
 
-// Struct for TransferredPhase
-typedef struct _TransferredPhase
+// Struct for TimeZoneType
+typedef struct _TimeZoneType
 {
-    uint8_t energyPhaseId;
-    uint8_t macroPhaseId;
-    uint16_t expectedDuration;
-    uint16_t peakPower;
-    uint16_t energy;
-    uint16_t maxActivationDelay;
-} TransferredPhase;
+    int32_t Offset;
+    uint64_t ValidAt;
+    chip::CharSpan Name;
+} TimeZoneType;
 
 // Struct for WiFiInterfaceScanResult
 typedef struct _WiFiInterfaceScanResult
@@ -609,7 +593,7 @@ typedef struct _WriteAttributeRecord
 // Struct for WriteAttributeStatusRecord
 typedef struct _WriteAttributeStatusRecord
 {
-    chip::Protocols::InteractionModel::Status status;
+    uint8_t status;
     chip::AttributeId attributeId;
 } WriteAttributeStatusRecord;
 
@@ -626,7 +610,7 @@ typedef struct _WriteStructuredAttributeRecord
 // Struct for WriteStructuredAttributeStatusRecord
 typedef struct _WriteStructuredAttributeStatusRecord
 {
-    chip::Protocols::InteractionModel::Status status;
+    uint8_t status;
     chip::AttributeId attributeId;
     uint8_t indicator;
     /* TYPE WARNING: array array defaults to */ uint8_t * indicies;

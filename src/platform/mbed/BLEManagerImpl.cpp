@@ -33,8 +33,8 @@
 #include <ble/CHIPBleServiceData.h>
 #include <lib/support/CodeUtils.h>
 #include <lib/support/logging/CHIPLogging.h>
-#include <platform/internal/BLEManager.h>
 #include <platform/CommissionableDataProvider.h>
+#include <platform/internal/BLEManager.h>
 
 // Show BLE status with LEDs
 #define _BLEMGRIMPL_USE_LEDS 0
@@ -245,7 +245,7 @@ class GapEventHandler : private mbed::NonCopyable<GapEventHandler>, public ble::
         {
             ChipLogError(DeviceLayer, "BLE connection failed, mbed-os error: %d", mbed_err);
         }
-        ChipLogProgress(DeviceLayer, "Current number of connections: %" PRIu16 "/%d", ble_manager.NumConnections(),
+        ChipLogProgress(DeviceLayer, "Current number of connections: %u/%d", ble_manager.NumConnections(),
                         ble_manager.kMaxConnections);
 
         // The connection established event is propagated when the client has subscribed to
@@ -309,7 +309,7 @@ class GapEventHandler : private mbed::NonCopyable<GapEventHandler>, public ble::
         PlatformMgrImpl().PostEventOrDie(&chip_event);
 
         ChipLogProgress(DeviceLayer, "BLE connection terminated, mbed-os reason: %d", reason.value());
-        ChipLogProgress(DeviceLayer, "Current number of connections: %" PRIu16 "/%d", ble_manager.NumConnections(),
+        ChipLogProgress(DeviceLayer, "Current number of connections: %u/%d", ble_manager.NumConnections(),
                         ble_manager.kMaxConnections);
 
         // Force a reconfiguration of advertising in case we switched to non-connectable mode when
@@ -666,16 +666,6 @@ void BLEManagerImpl::DriveBLEState()
     if (!mFlags.Has(kFlag_AsyncInitCompleted))
     {
         mFlags.Set(kFlag_AsyncInitCompleted);
-
-        // If CHIP_DEVICE_CONFIG_CHIPOBLE_DISABLE_ADVERTISING_WHEN_PROVISIONED is enabled,
-        // disable CHIPoBLE advertising if the device is fully provisioned.
-#if CHIP_DEVICE_CONFIG_CHIPOBLE_DISABLE_ADVERTISING_WHEN_PROVISIONED
-        if (ConfigurationMgr().IsFullyProvisioned())
-        {
-            mFlags.Clear(kFlag_AdvertisingEnabled);
-            ChipLogProgress(DeviceLayer, "CHIPoBLE advertising disabled because device is fully provisioned");
-        }
-#endif // CHIP_DEVICE_CONFIG_CHIPOBLE_DISABLE_ADVERTISING_WHEN_PROVISIONED
     }
 
     // If the application has enabled CHIPoBLE and BLE advertising...
@@ -828,23 +818,6 @@ exit:
     {
         ChipLogError(DeviceLayer, "StopAdvertising mbed-os error: %d", mbed_err);
     }
-    return err;
-}
-
-CHIP_ERROR BLEManagerImpl::_SetCHIPoBLEServiceMode(CHIPoBLEServiceMode val)
-{
-    CHIP_ERROR err = CHIP_NO_ERROR;
-
-    VerifyOrExit(val != ConnectivityManager::kCHIPoBLEServiceMode_NotSupported, err = CHIP_ERROR_INVALID_ARGUMENT);
-    VerifyOrExit(mServiceMode != ConnectivityManager::kCHIPoBLEServiceMode_NotSupported, err = CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE);
-
-    if (val != mServiceMode)
-    {
-        mServiceMode = val;
-        PlatformMgr().ScheduleWork(DriveBLEState, 0);
-    }
-
-exit:
     return err;
 }
 
@@ -1031,7 +1004,7 @@ bool BLEManagerImpl::SendIndication(BLE_CONNECTION_OBJECT conId, const ChipBleUU
 
     ChipLogDetail(DeviceLayer,
                   "Sending indication for CHIPoBLE characteristic "
-                  "(connHandle=%d, attHandle=%d, data_len=%" PRIu16 ")",
+                  "(connHandle=%d, attHandle=%d, data_len=%u)",
                   conId, att_handle, pBuf->DataLength());
 
     mbed_err = gatt_server.write(att_handle, pBuf->Start(), pBuf->DataLength(), false);

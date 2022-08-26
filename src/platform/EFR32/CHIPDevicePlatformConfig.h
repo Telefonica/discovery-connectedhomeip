@@ -44,11 +44,17 @@
 #endif /* CHIP_ENABLE_OPENTHREAD */
 #endif /* defined(SL_WIFI) */
 
-#define CHIP_DEVICE_CONFIG_ENABLE_EXTENDED_DISCOVERY 1
-
 #define CHIP_DEVICE_CONFIG_ENABLE_CHIPOBLE 1
 
 #define CHIP_DEVICE_CONFIG_ENABLE_CHIP_TIME_SERVICE_TIME_SYNC 0
+
+#if defined(SL_WIFI)
+
+#ifndef CHIP_DEVICE_CONFIG_ENABLE_IPV4
+#define CHIP_DEVICE_CONFIG_ENABLE_IPV4 0
+#endif /* CHIP_DEVICE_CONFIG_ENABLE_IPV4 */
+
+#endif /* SL_WIFI */
 
 // ========== Platform-specific Configuration =========
 

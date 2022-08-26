@@ -668,8 +668,8 @@ void CheckAddressQuartet(nlTestSuite * inSuite, const uint32_t & inFirstAddressQ
 
     if (!lResult)
     {
-        fprintf(stdout, "Address quartet %zu mismatch: actual 0x%08" PRIX32 ", expected: 0x%08" PRIX32 "\n", inWhich,
-                inFirstAddressQuartet, inSecondAddressQuartet);
+        fprintf(stdout, "Address quartet %u mismatch: actual 0x%08" PRIX32 ", expected: 0x%08" PRIX32 "\n",
+                static_cast<unsigned int>(inWhich), inFirstAddressQuartet, inSecondAddressQuartet);
     }
 }
 
@@ -1010,7 +1010,10 @@ void CheckToIPv6(nlTestSuite * inSuite, void * inContext)
 
 #if CHIP_SYSTEM_CONFIG_USE_LWIP
         ip6_addr_t ip_addr_1, ip_addr_2;
-        ip_addr_1 = *(ip6_addr_t *) addr;
+        memcpy(ip_addr_1.addr, addr, sizeof(addr));
+#if LWIP_IPV6_SCOPES
+        ip_addr_1.zone = 0;
+#endif
 #else
         struct in6_addr ip_addr_1, ip_addr_2;
         ip_addr_1 = *reinterpret_cast<struct in6_addr *>(addr);
@@ -1047,7 +1050,7 @@ void CheckFromIPv6(nlTestSuite * inSuite, void * inContext)
 
 #if CHIP_SYSTEM_CONFIG_USE_LWIP
         ip6_addr_t ip_addr;
-        ip_addr = *(ip6_addr_t *) addr;
+        memcpy(ip_addr.addr, addr, sizeof(addr));
 #else
         struct in6_addr ip_addr;
         ip_addr = *reinterpret_cast<struct in6_addr *>(addr);

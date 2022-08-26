@@ -17,28 +17,85 @@
  */
 package com.chip.casting;
 
-import android.util.Log;
-
 public class TvCastingApp {
-  private TvCastingAppCallback mCallback;
   private static final String TAG = TvCastingApp.class.getSimpleName();
 
-  public TvCastingApp(TvCastingAppCallback callback) {
-    mCallback = callback;
-    nativeInit();
-  }
+  public native void setDACProvider(DACProvider provider);
 
-  private void postClusterInit(int clusterId, int endpoint) {
-    Log.d(TAG, "postClusterInit for " + clusterId + " at " + endpoint);
-    if (mCallback != null) {
-      mCallback.onClusterInit(this, clusterId, endpoint);
-    }
-  }
+  public native boolean openBasicCommissioningWindow(
+      int duration, Object commissioningCompleteHandler);
 
-  public native void nativeInit();
+  public native boolean sendUserDirectedCommissioningRequest(String address, int port);
 
-  /** TBD: Temp dummy function for testing */
-  public native void doSomethingInCpp(int endpoint);
+  public native boolean discoverCommissioners();
+
+  public native void init();
+
+  /*
+   * CONTENT LAUNCHER CLUSTER
+   */
+  public native boolean contentLauncherLaunchURL(
+      String contentUrl, String contentDisplayStr, Object launchURLHandler);
+
+  /*
+   * LEVEL CONTROL CLUSTER
+   */
+  public native boolean levelControl_step(
+      byte stepMode,
+      byte stepSize,
+      short transitionTime,
+      byte optionMask,
+      byte optionOverridem,
+      Object responseHandler);
+
+  public native boolean levelControl_moveToLevel(
+      byte level,
+      short transitionTime,
+      byte optionMask,
+      byte optionOverridem,
+      Object responseHandler);
+
+  /*
+   * MEDIA PLAYBACK CLUSTER
+   */
+  public native boolean mediaPlayback_play(Object responseHandler);
+
+  public native boolean mediaPlayback_pause(Object responseHandler);
+
+  public native boolean mediaPlayback_stopPlayback(Object responseHandler);
+
+  public native boolean mediaPlayback_next(Object responseHandler);
+
+  public native boolean mediaPlayback_seek(long position, Object responseHandler);
+
+  public native boolean mediaPlayback_skipForward(
+      long deltaPositionMilliseconds, Object responseHandler);
+
+  public native boolean mediaPlayback_skipBackward(
+      long deltaPositionMilliseconds, Object responseHandler);
+
+  /*
+   * APPLICATION LAUNCHER CLUSTER
+   */
+  public native boolean applicationLauncher_launchApp(
+      short catalogVendorId, String applicationId, String data, Object responseHandler);
+
+  public native boolean applicationLauncher_stopApp(
+      short catalogVendorId, String applicationId, Object responseHandler);
+
+  public native boolean applicationLauncher_hideApp(
+      short catalogVendorId, String applicationId, Object responseHandler);
+
+  /*
+   * TARGET NAVIGATOR CLUSTER
+   */
+  public native boolean targetNavigator_navigateTarget(
+      byte target, String data, Object responseHandler);
+
+  /*
+   * KEYPAD INPUT CLUSTER
+   */
+  public native boolean keypadInput_sendKey(byte keyCode, Object responseHandler);
 
   static {
     System.loadLibrary("TvCastingApp");

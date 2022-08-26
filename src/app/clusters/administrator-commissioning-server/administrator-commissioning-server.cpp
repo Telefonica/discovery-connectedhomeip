@@ -51,10 +51,6 @@ public:
     {}
 
     CHIP_ERROR Read(const ConcreteReadAttributePath & aPath, AttributeValueEncoder & aEncoder) override;
-
-    // Vendor ID and Fabric Index of the admin that has opened the commissioning window
-    uint16_t mVendorId;
-    FabricIndex mFabricIndex;
 };
 
 AdministratorCommissioningAttrAccess gAdminCommissioningAttrAccess;
@@ -66,21 +62,13 @@ CHIP_ERROR AdministratorCommissioningAttrAccess::Read(const ConcreteReadAttribut
     switch (aPath.mAttributeId)
     {
     case Attributes::WindowStatus::Id: {
-        return aEncoder.Encode(Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus());
+        return aEncoder.Encode(Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatusForCluster());
     }
     case Attributes::AdminFabricIndex::Id: {
-        FabricIndex fabricIndex = (Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus() ==
-                                   CommissioningWindowStatus::kWindowNotOpen)
-            ? 0
-            : mFabricIndex;
-        return aEncoder.Encode(fabricIndex);
+        return aEncoder.Encode(Server::GetInstance().GetCommissioningWindowManager().GetOpenerFabricIndex());
     }
     case Attributes::AdminVendorId::Id: {
-        uint16_t vendorId = (Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus() ==
-                             CommissioningWindowStatus::kWindowNotOpen)
-            ? 0
-            : mVendorId;
-        return aEncoder.Encode(vendorId);
+        return aEncoder.Encode(Server::GetInstance().GetCommissioningWindowManager().GetOpenerVendorId());
     }
     default:
         break;
@@ -105,16 +93,15 @@ bool emberAfAdministratorCommissioningClusterOpenCommissioningWindowCallback(
 
     ChipLogProgress(Zcl, "Received command to open commissioning window");
 
-    FabricIndex fabricIndex                        = commandObj->GetAccessingFabricIndex();
-    FabricInfo * fabricInfo                        = Server::GetInstance().GetFabricTable().FindFabricWithIndex(fabricIndex);
-    DeviceLayer::FailSafeContext & failSafeContext = DeviceLayer::DeviceControlServer::DeviceControlSvr().GetFailSafeContext();
+    FabricIndex fabricIndex       = commandObj->GetAccessingFabricIndex();
+    const FabricInfo * fabricInfo = Server::GetInstance().GetFabricTable().FindFabricWithIndex(fabricIndex);
+    auto & failSafeContext        = Server::GetInstance().GetFailSafeContext();
+    auto & commissionMgr          = Server::GetInstance().GetCommissioningWindowManager();
 
     VerifyOrExit(fabricInfo != nullptr, status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
-    VerifyOrExit(!failSafeContext.IsFailSafeArmed(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
+    VerifyOrExit(failSafeContext.IsFailSafeFullyDisarmed(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
 
-    VerifyOrExit(Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus() ==
-                     CommissioningWindowStatus::kWindowNotOpen,
-                 status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
+    VerifyOrExit(!commissionMgr.IsCommissioningWindowOpen(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
     VerifyOrExit(iterations >= kSpake2p_Min_PBKDF_Iterations,
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
     VerifyOrExit(iterations <= kSpake2p_Max_PBKDF_Iterations,
@@ -123,21 +110,18 @@ bool emberAfAdministratorCommissioningClusterOpenCommissioningWindowCallback(
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
     VerifyOrExit(salt.size() <= kSpake2p_Max_PBKDF_Salt_Length,
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
-    VerifyOrExit(commissioningTimeout <= CommissioningWindowManager::MaxCommissioningTimeout(),
+    VerifyOrExit(commissioningTimeout <= commissionMgr.MaxCommissioningTimeout(),
                  globalStatus = InteractionModel::Status::InvalidCommand);
-    VerifyOrExit(commissioningTimeout >= CommissioningWindowManager::MinCommissioningTimeout(),
+    VerifyOrExit(commissioningTimeout >= commissionMgr.MinCommissioningTimeout(),
                  globalStatus = InteractionModel::Status::InvalidCommand);
     VerifyOrExit(discriminator <= kMaxDiscriminatorValue, globalStatus = InteractionModel::Status::InvalidCommand);
 
     VerifyOrExit(verifier.Deserialize(pakeVerifier) == CHIP_NO_ERROR,
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
-    VerifyOrExit(Server::GetInstance().GetCommissioningWindowManager().OpenEnhancedCommissioningWindow(
-                     commissioningTimeout, discriminator, verifier, iterations, salt) == CHIP_NO_ERROR,
+    VerifyOrExit(commissionMgr.OpenEnhancedCommissioningWindow(commissioningTimeout, discriminator, verifier, iterations, salt,
+                                                               fabricIndex, fabricInfo->GetVendorId()) == CHIP_NO_ERROR,
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
     ChipLogProgress(Zcl, "Commissioning window is now open");
-
-    gAdminCommissioningAttrAccess.mFabricIndex = fabricIndex;
-    gAdminCommissioningAttrAccess.mVendorId    = fabricInfo->GetVendorId();
 
 exit:
     if (status.HasValue())
@@ -167,28 +151,23 @@ bool emberAfAdministratorCommissioningClusterOpenBasicCommissioningWindowCallbac
     InteractionModel::Status globalStatus = InteractionModel::Status::Success;
     ChipLogProgress(Zcl, "Received command to open basic commissioning window");
 
-    FabricIndex fabricIndex = commandObj->GetAccessingFabricIndex();
-    FabricInfo * fabricInfo = Server::GetInstance().GetFabricTable().FindFabricWithIndex(fabricIndex);
-    chip::DeviceLayer::FailSafeContext & failSafeContext =
-        DeviceLayer::DeviceControlServer::DeviceControlSvr().GetFailSafeContext();
+    FabricIndex fabricIndex       = commandObj->GetAccessingFabricIndex();
+    const FabricInfo * fabricInfo = Server::GetInstance().GetFabricTable().FindFabricWithIndex(fabricIndex);
+    auto & failSafeContext        = Server::GetInstance().GetFailSafeContext();
+    auto & commissionMgr          = Server::GetInstance().GetCommissioningWindowManager();
 
     VerifyOrExit(fabricInfo != nullptr, status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
 
-    VerifyOrExit(Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus() ==
-                     CommissioningWindowStatus::kWindowNotOpen,
-                 status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
-    VerifyOrExit(!failSafeContext.IsFailSafeArmed(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
-    VerifyOrExit(commissioningTimeout <= CommissioningWindowManager::MaxCommissioningTimeout(),
+    VerifyOrExit(!commissionMgr.IsCommissioningWindowOpen(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
+    VerifyOrExit(failSafeContext.IsFailSafeFullyDisarmed(), status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_BUSY));
+    VerifyOrExit(commissioningTimeout <= commissionMgr.MaxCommissioningTimeout(),
                  globalStatus = InteractionModel::Status::InvalidCommand);
-    VerifyOrExit(commissioningTimeout >= CommissioningWindowManager::MinCommissioningTimeout(),
+    VerifyOrExit(commissioningTimeout >= commissionMgr.MinCommissioningTimeout(),
                  globalStatus = InteractionModel::Status::InvalidCommand);
-    VerifyOrExit(Server::GetInstance().GetCommissioningWindowManager().OpenBasicCommissioningWindow(
-                     commissioningTimeout, CommissioningWindowAdvertisement::kDnssdOnly) == CHIP_NO_ERROR,
+    VerifyOrExit(commissionMgr.OpenBasicCommissioningWindowForAdministratorCommissioningCluster(
+                     commissioningTimeout, fabricIndex, fabricInfo->GetVendorId()) == CHIP_NO_ERROR,
                  status.Emplace(StatusCode::EMBER_ZCL_STATUS_CODE_PAKE_PARAMETER_ERROR));
     ChipLogProgress(Zcl, "Commissioning window is now open");
-
-    gAdminCommissioningAttrAccess.mFabricIndex = fabricIndex;
-    gAdminCommissioningAttrAccess.mVendorId    = fabricInfo->GetVendorId();
 
 exit:
     if (status.HasValue())
@@ -214,8 +193,7 @@ bool emberAfAdministratorCommissioningClusterRevokeCommissioningCallback(
 {
     ChipLogProgress(Zcl, "Received command to close commissioning window");
 
-    if (Server::GetInstance().GetCommissioningWindowManager().CommissioningWindowStatus() ==
-        CommissioningWindowStatus::kWindowNotOpen)
+    if (!Server::GetInstance().GetCommissioningWindowManager().IsCommissioningWindowOpen())
     {
         ChipLogError(Zcl, "Commissioning window is currently not open");
         commandObj->AddClusterSpecificFailure(commandPath, StatusCode::EMBER_ZCL_STATUS_CODE_WINDOW_NOT_OPEN);

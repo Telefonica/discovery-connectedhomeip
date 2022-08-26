@@ -32,8 +32,8 @@ if(${IDF_TARGET} STREQUAL "esp32")
 endif()
 
 project(chip-all-clusters-app)
-idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DLWIP_IPV6_SCOPES=0;-DCHIP_HAVE_CONFIG_H" APPEND)
-idf_build_set_property(C_COMPILE_OPTIONS "-Os;-DLWIP_IPV6_SCOPES=0" APPEND)
+idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H" APPEND)
+idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 # For the C3, project_include.cmake sets -Wno-format, but does not clear various
 # flags that depend on -Wformat
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
@@ -49,8 +49,12 @@ flashing_script()
 if (CONFIG_ENABLE_PW_RPC)
 get_filename_component(CHIP_ROOT ./third_party/connectedhomeip REALPATH)
 include(third_party/connectedhomeip/third_party/pigweed/repo/pw_build/pigweed.cmake)
+
+pw_set_module_config(pw_rpc_CONFIG pw_rpc.disable_global_mutex_config)
+
 pw_set_backend(pw_log pw_log_basic)
-pw_set_backend(pw_assert pw_assert_log)
+pw_set_backend(pw_assert.check pw_assert_log.check_backend)
+pw_set_backend(pw_assert.assert pw_assert.assert_compatibility_backend)
 pw_set_backend(pw_sys_io pw_sys_io.esp32)
 pw_set_backend(pw_trace pw_trace_tokenized)
 

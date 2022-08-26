@@ -16,6 +16,7 @@
  */
 
 #include "ChannelManager.h"
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <vector>
 
 using namespace chip;
@@ -122,18 +123,18 @@ void ChannelManager::HandleChangeChannel(CommandResponseHelper<ChangeChannelResp
     // Error: Found multiple matches
     if (matchedChannels.size() > 1)
     {
-        response.status = chip::app::Clusters::Channel::StatusEnum::kMultipleMatches;
+        response.status = chip::app::Clusters::Channel::ChannelStatusEnum::kMultipleMatches;
         helper.Success(response);
     }
     else if (matchedChannels.size() == 0)
     {
         // Error: Found no match
-        response.status = chip::app::Clusters::Channel::StatusEnum::kNoMatches;
+        response.status = chip::app::Clusters::Channel::ChannelStatusEnum::kNoMatches;
         helper.Success(response);
     }
     else
     {
-        response.status      = chip::app::Clusters::Channel::StatusEnum::kSuccess;
+        response.status      = chip::app::Clusters::Channel::ChannelStatusEnum::kSuccess;
         response.data        = chip::MakeOptional(CharSpan::fromCharString("data response"));
         mCurrentChannel      = matchedChannels[0];
         mCurrentChannelIndex = index;
@@ -171,4 +172,16 @@ bool ChannelManager::HandleSkipChannel(const uint16_t & count)
     mCurrentChannelIndex     = newChannelIndex;
     mCurrentChannel          = mChannels[mCurrentChannelIndex];
     return true;
+}
+
+uint32_t ChannelManager::GetFeatureMap(chip::EndpointId endpoint)
+{
+    if (endpoint >= EMBER_AF_CONTENT_LAUNCH_CLUSTER_SERVER_ENDPOINT_COUNT)
+    {
+        return mDynamicEndpointFeatureMap;
+    }
+
+    uint32_t featureMap = 0;
+    Attributes::FeatureMap::Get(endpoint, &featureMap);
+    return featureMap;
 }

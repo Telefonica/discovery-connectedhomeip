@@ -17,6 +17,7 @@
 
 #include "ChannelManager.h"
 #include "TvApp-JNI.h"
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <cstdlib>
 #include <jni.h>
@@ -141,37 +142,44 @@ CHIP_ERROR ChannelManager::HandleGetLineup(AttributeValueEncoder & aEncoder)
 
     {
         jobject channelLineupObject = env->CallObjectMethod(mChannelManagerObject, mGetLineupMethod);
-        jclass channelLineupClazz   = env->GetObjectClass(channelLineupObject);
-
-        jfieldID operatorNameFild = env->GetFieldID(channelLineupClazz, "operatorName", "Ljava/lang/String;");
-        jstring joperatorName     = static_cast<jstring>(env->GetObjectField(channelLineupObject, operatorNameFild));
-        JniUtfString operatorName(env, joperatorName);
-        if (joperatorName != nullptr)
+        if (channelLineupObject != nullptr)
         {
-            lineupInfo.operatorName = operatorName.charSpan();
-        }
+            jclass channelLineupClazz = env->GetObjectClass(channelLineupObject);
 
-        jfieldID lineupNameFild = env->GetFieldID(channelLineupClazz, "lineupName", "Ljava/lang/String;");
-        jstring jlineupName     = static_cast<jstring>(env->GetObjectField(channelLineupObject, lineupNameFild));
-        JniUtfString lineupName(env, jlineupName);
-        if (jlineupName != nullptr)
+            jfieldID operatorNameFild = env->GetFieldID(channelLineupClazz, "operatorName", "Ljava/lang/String;");
+            jstring joperatorName     = static_cast<jstring>(env->GetObjectField(channelLineupObject, operatorNameFild));
+            JniUtfString operatorName(env, joperatorName);
+            if (joperatorName != nullptr)
+            {
+                lineupInfo.operatorName = operatorName.charSpan();
+            }
+
+            jfieldID lineupNameFild = env->GetFieldID(channelLineupClazz, "lineupName", "Ljava/lang/String;");
+            jstring jlineupName     = static_cast<jstring>(env->GetObjectField(channelLineupObject, lineupNameFild));
+            JniUtfString lineupName(env, jlineupName);
+            if (jlineupName != nullptr)
+            {
+                lineupInfo.lineupName = Optional<CharSpan>(lineupName.charSpan());
+            }
+
+            jfieldID postalCodeFild = env->GetFieldID(channelLineupClazz, "postalCode", "Ljava/lang/String;");
+            jstring jpostalCode     = static_cast<jstring>(env->GetObjectField(channelLineupObject, postalCodeFild));
+            JniUtfString postalCode(env, jpostalCode);
+            if (jpostalCode != nullptr)
+            {
+                lineupInfo.postalCode = Optional<CharSpan>(postalCode.charSpan());
+            }
+
+            jfieldID lineupInfoTypeFild = env->GetFieldID(channelLineupClazz, "lineupInfoType", "I");
+            jint jlineupInfoType        = (env->GetIntField(channelLineupObject, lineupInfoTypeFild));
+            lineupInfo.lineupInfoType   = static_cast<app::Clusters::Channel::LineupInfoTypeEnum>(jlineupInfoType);
+
+            err = aEncoder.Encode(lineupInfo);
+        }
+        else
         {
-            lineupInfo.lineupName = Optional<CharSpan>(lineupName.charSpan());
+            err = aEncoder.EncodeNull();
         }
-
-        jfieldID postalCodeFild = env->GetFieldID(channelLineupClazz, "postalCode", "Ljava/lang/String;");
-        jstring jpostalCode     = static_cast<jstring>(env->GetObjectField(channelLineupObject, postalCodeFild));
-        JniUtfString postalCode(env, jpostalCode);
-        if (jpostalCode != nullptr)
-        {
-            lineupInfo.postalCode = Optional<CharSpan>(postalCode.charSpan());
-        }
-
-        jfieldID lineupInfoTypeFild = env->GetFieldID(channelLineupClazz, "lineupInfoType", "I");
-        jint jlineupInfoType        = (env->GetIntField(channelLineupObject, lineupInfoTypeFild));
-        lineupInfo.lineupInfoType   = static_cast<app::Clusters::Channel::LineupInfoTypeEnum>(jlineupInfoType);
-
-        err = aEncoder.Encode(lineupInfo);
     }
 
 exit:
@@ -195,41 +203,49 @@ CHIP_ERROR ChannelManager::HandleGetCurrentChannel(AttributeValueEncoder & aEnco
 
     {
         jobject channelInfoObject = env->CallObjectMethod(mChannelManagerObject, mGetCurrentChannelMethod);
-        jclass channelClass       = env->GetObjectClass(channelInfoObject);
-
-        jfieldID getCallSignField = env->GetFieldID(channelClass, "callSign", "Ljava/lang/String;");
-        jstring jcallSign         = static_cast<jstring>(env->GetObjectField(channelInfoObject, getCallSignField));
-        JniUtfString callsign(env, jcallSign);
-        if (jcallSign != nullptr)
+        if (channelInfoObject != nullptr)
         {
-            channelInfo.callSign = Optional<CharSpan>(callsign.charSpan());
-        }
+            jclass channelClass = env->GetObjectClass(channelInfoObject);
 
-        jfieldID getNameField = env->GetFieldID(channelClass, "name", "Ljava/lang/String;");
-        jstring jname         = static_cast<jstring>(env->GetObjectField(channelInfoObject, getNameField));
-        JniUtfString name(env, jname);
-        if (jname != nullptr)
+            jfieldID getCallSignField = env->GetFieldID(channelClass, "callSign", "Ljava/lang/String;");
+            jstring jcallSign         = static_cast<jstring>(env->GetObjectField(channelInfoObject, getCallSignField));
+            JniUtfString callsign(env, jcallSign);
+            if (jcallSign != nullptr)
+            {
+                channelInfo.callSign = Optional<CharSpan>(callsign.charSpan());
+            }
+
+            jfieldID getNameField = env->GetFieldID(channelClass, "name", "Ljava/lang/String;");
+            jstring jname         = static_cast<jstring>(env->GetObjectField(channelInfoObject, getNameField));
+            JniUtfString name(env, jname);
+            if (jname != nullptr)
+            {
+                channelInfo.name = Optional<CharSpan>(name.charSpan());
+            }
+
+            jfieldID getJaffiliateCallSignField = env->GetFieldID(channelClass, "affiliateCallSign", "Ljava/lang/String;");
+            jstring jaffiliateCallSign = static_cast<jstring>(env->GetObjectField(channelInfoObject, getJaffiliateCallSignField));
+            JniUtfString affiliateCallSign(env, jaffiliateCallSign);
+            if (jaffiliateCallSign != nullptr)
+            {
+                channelInfo.affiliateCallSign = Optional<CharSpan>(affiliateCallSign.charSpan());
+            }
+
+            jfieldID majorNumField  = env->GetFieldID(channelClass, "majorNumber", "I");
+            jint jmajorNum          = env->GetIntField(channelInfoObject, majorNumField);
+            channelInfo.majorNumber = static_cast<uint16_t>(jmajorNum);
+
+            jfieldID minorNumField  = env->GetFieldID(channelClass, "minorNumber", "I");
+            jint jminorNum          = env->GetIntField(channelInfoObject, minorNumField);
+            channelInfo.minorNumber = static_cast<uint16_t>(jminorNum);
+
+            err = aEncoder.Encode(channelInfo);
+        }
+        else
         {
-            channelInfo.name = Optional<CharSpan>(name.charSpan());
+            err = aEncoder.EncodeNull();
+            return err;
         }
-
-        jfieldID getJaffiliateCallSignField = env->GetFieldID(channelClass, "affiliateCallSign", "Ljava/lang/String;");
-        jstring jaffiliateCallSign = static_cast<jstring>(env->GetObjectField(channelInfoObject, getJaffiliateCallSignField));
-        JniUtfString affiliateCallSign(env, jaffiliateCallSign);
-        if (jaffiliateCallSign != nullptr)
-        {
-            channelInfo.affiliateCallSign = Optional<CharSpan>(affiliateCallSign.charSpan());
-        }
-
-        jfieldID majorNumField  = env->GetFieldID(channelClass, "majorNumber", "I");
-        jint jmajorNum          = env->GetIntField(channelInfoObject, majorNumField);
-        channelInfo.majorNumber = static_cast<uint16_t>(jmajorNum);
-
-        jfieldID minorNumField  = env->GetFieldID(channelClass, "minorNumber", "I");
-        jint jminorNum          = env->GetIntField(channelInfoObject, minorNumField);
-        channelInfo.minorNumber = static_cast<uint16_t>(jminorNum);
-
-        err = aEncoder.Encode(channelInfo);
     }
 
 exit:
@@ -269,7 +285,7 @@ void ChannelManager::HandleChangeChannel(CommandResponseHelper<ChangeChannelResp
 
         jfieldID getStatusField = env->GetFieldID(channelClass, "status", "I");
         jint jstatus            = env->GetIntField(channelObject, getStatusField);
-        response.status         = static_cast<app::Clusters::Channel::StatusEnum>(jstatus);
+        response.status         = static_cast<app::Clusters::Channel::ChannelStatusEnum>(jstatus);
 
         jfieldID getNameField = env->GetFieldID(channelClass, "name", "Ljava/lang/String;");
         jstring jname         = static_cast<jstring>(env->GetObjectField(channelObject, getNameField));
@@ -349,28 +365,29 @@ void ChannelManager::InitializeWithObjects(jobject managerObject)
     jclass managerClass = env->GetObjectClass(mChannelManagerObject);
     VerifyOrReturn(managerClass != nullptr, ChipLogError(Zcl, "Failed to get ChannelManager Java class"));
 
-    mGetChannelListMethod = env->GetMethodID(managerClass, "getChannelList", "()[Lcom/tcl/chip/tvapp/ChannelInfo;");
+    mGetChannelListMethod = env->GetMethodID(managerClass, "getChannelList", "()[Lcom/matter/tv/server/tvapp/ChannelInfo;");
     if (mGetChannelListMethod == nullptr)
     {
         ChipLogError(Zcl, "Failed to access ChannelManager 'getChannelList' method");
         env->ExceptionClear();
     }
 
-    mGetLineupMethod = env->GetMethodID(managerClass, "getLineup", "()Lcom/tcl/chip/tvapp/ChannelLineupInfo;");
+    mGetLineupMethod = env->GetMethodID(managerClass, "getLineup", "()Lcom/matter/tv/server/tvapp/ChannelLineupInfo;");
     if (mGetLineupMethod == nullptr)
     {
         ChipLogError(Zcl, "Failed to access ChannelManager 'getLineup' method");
         env->ExceptionClear();
     }
 
-    mGetCurrentChannelMethod = env->GetMethodID(managerClass, "getCurrentChannel", "()Lcom/tcl/chip/tvapp/ChannelInfo;");
+    mGetCurrentChannelMethod = env->GetMethodID(managerClass, "getCurrentChannel", "()Lcom/matter/tv/server/tvapp/ChannelInfo;");
     if (mGetCurrentChannelMethod == nullptr)
     {
         ChipLogError(Zcl, "Failed to access ChannelManager 'getCurrentChannel' method");
         env->ExceptionClear();
     }
 
-    mChangeChannelMethod = env->GetMethodID(managerClass, "changeChannel", "(Ljava/lang/String;)Lcom/tcl/chip/tvapp/ChannelInfo;");
+    mChangeChannelMethod =
+        env->GetMethodID(managerClass, "changeChannel", "(Ljava/lang/String;)Lcom/matter/tv/server/tvapp/ChannelInfo;");
     if (mChangeChannelMethod == nullptr)
     {
         ChipLogError(Zcl, "Failed to access ChannelManager 'changeChannel' method");
@@ -390,4 +407,16 @@ void ChannelManager::InitializeWithObjects(jobject managerObject)
         ChipLogError(Zcl, "Failed to access ChannelManager 'skipChannel' method");
         env->ExceptionClear();
     }
+}
+
+uint32_t ChannelManager::GetFeatureMap(chip::EndpointId endpoint)
+{
+    if (endpoint >= EMBER_AF_CONTENT_LAUNCH_CLUSTER_SERVER_ENDPOINT_COUNT)
+    {
+        return mDynamicEndpointFeatureMap;
+    }
+
+    uint32_t featureMap = 0;
+    Attributes::FeatureMap::Get(endpoint, &featureMap);
+    return featureMap;
 }

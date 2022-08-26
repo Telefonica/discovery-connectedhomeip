@@ -63,16 +63,11 @@ public:
 
     void Shutdown();
 
-#if CONFIG_IM_BUILD_FOR_UNIT_TEST
+#if CONFIG_BUILD_FOR_HOST_UNIT_TEST
     void SetWriterReserved(uint32_t aReservedSize) { mReservedSize = aReservedSize; }
 
     void SetMaxAttributesPerChunk(uint32_t aMaxAttributesPerChunk) { mMaxAttributesPerChunk = aMaxAttributesPerChunk; }
 #endif
-
-    /**
-     * Main work-horse function that executes the run-loop.
-     */
-    void Run();
 
     /**
      * Should be invoked when the device receives a Status report, or when the Report data request times out.
@@ -124,9 +119,24 @@ public:
 
     uint64_t GetDirtySetGeneration() const { return mDirtyGeneration; }
 
-    void ScheduleUrgentEventDeliverySync();
+    /**
+     * Schedule event delivery to happen immediately and run reporting to get
+     * those reports into messages and on the wire.  This can be done either for
+     * a specific fabric, identified by the provided FabricIndex, or across all
+     * fabrics if no FabricIndex is provided.
+     */
+    void ScheduleUrgentEventDeliverySync(Optional<FabricIndex> fabricIndex = NullOptional);
+
+#if CONFIG_BUILD_FOR_HOST_UNIT_TEST
+    size_t GetGlobalDirtySetSize() { return mGlobalDirtySet.Allocated(); }
+#endif
 
 private:
+    /**
+     * Main work-horse function that executes the run-loop.
+     */
+    void Run();
+
     friend class TestReportingEngine;
 
     struct AttributePathParamsWithGeneration : public AttributePathParams
@@ -150,6 +160,7 @@ private:
                                    AttributeReportIBs::Builder & aAttributeReportIBs,
                                    const ConcreteReadAttributePath & aClusterInfo,
                                    AttributeValueEncoder::AttributeEncodeState * apEncoderState);
+    CHIP_ERROR CheckAccessDeniedEventPaths(TLV::TLVWriter & aWriter, bool & aHasEncodedData, ReadHandler * apReadHandler);
 
     // If version match, it means don't send, if version mismatch, it means send.
     // If client sends the same path with multiple data versions, client will get the data back per the spec, because at least one
@@ -159,12 +170,6 @@ private:
     bool IsClusterDataVersionMatch(const ObjectList<DataVersionFilter> * aDataVersionFilterList,
                                    const ConcreteReadAttributePath & aPath);
 
-    /**
-     * Check all active subscription, if the subscription has no paths that intersect with global dirty set,
-     * it would clear dirty flag for that subscription
-     *
-     */
-    void UpdateReadHandlerDirty(ReadHandler & aReadHandler);
     /**
      * Send Report via ReadHandler
      *
@@ -187,6 +192,31 @@ private:
      * Return whether one of our paths is now a superset of the provided path.
      */
     bool MergeOverlappedAttributePath(const AttributePathParams & aAttributePath);
+
+    /**
+     * If we are running out of ObjectPool for the global dirty set, we will try to merge the existing items by clusters.
+     *
+     * Returns whether we have released any paths.
+     */
+    bool MergeDirtyPathsUnderSameCluster();
+
+    /**
+     * If we are running out of ObjectPool for the global dirty set and we cannot find a slot after merging the existing items by
+     * clusters, we will try to merge the existing items by endpoints.
+     *
+     * Returns whether we have released any paths.
+     */
+    bool MergeDirtyPathsUnderSameEndpoint();
+
+    /**
+     * During the iterating of the paths, releasing the object in the inner loop will cause undefined behavior of the ObjectPool, so
+     * we replace the items to be cleared by a tomb first, then clear all the tombs after the iteration.
+     *
+     * Returns whether we have released any paths.
+     */
+    bool ClearTombPaths();
+
+    CHIP_ERROR InsertPathIntoDirtySet(const AttributePathParams & aAttributePath);
 
     inline void BumpDirtySetGeneration() { mDirtyGeneration++; }
 
@@ -218,7 +248,12 @@ private:
      *  mGlobalDirtySet is used to track the set of attribute/event paths marked dirty for reporting purposes.
      *
      */
+#if CONFIG_BUILD_FOR_HOST_UNIT_TEST
+    // For unit tests, always use inline allocation for code coverage.
+    ObjectPool<AttributePathParamsWithGeneration, CHIP_IM_SERVER_MAX_NUM_DIRTY_SET, ObjectPoolMem::kInline> mGlobalDirtySet;
+#else
     ObjectPool<AttributePathParamsWithGeneration, CHIP_IM_SERVER_MAX_NUM_DIRTY_SET> mGlobalDirtySet;
+#endif
 
     /**
      * A generation counter for the dirty attrbute set.
@@ -234,7 +269,7 @@ private:
      */
     uint64_t mDirtyGeneration = 1;
 
-#if CONFIG_IM_BUILD_FOR_UNIT_TEST
+#if CONFIG_BUILD_FOR_HOST_UNIT_TEST
     uint32_t mReservedSize          = 0;
     uint32_t mMaxAttributesPerChunk = UINT32_MAX;
 #endif

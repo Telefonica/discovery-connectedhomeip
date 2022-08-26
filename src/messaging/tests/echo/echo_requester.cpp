@@ -150,28 +150,19 @@ CHIP_ERROR SendEchoRequest()
 
 CHIP_ERROR EstablishSecureSession()
 {
-    CHIP_ERROR err = CHIP_NO_ERROR;
-
-    chip::Optional<chip::Transport::PeerAddress> peerAddr;
-    chip::SecurePairingUsingTestSecret * testSecurePairingSecret = chip::Platform::New<chip::SecurePairingUsingTestSecret>();
-    VerifyOrExit(testSecurePairingSecret != nullptr, err = CHIP_ERROR_NO_MEMORY);
-    testSecurePairingSecret->Init(gSessionManager);
-
+    chip::Transport::PeerAddress peerAddr;
     if (gUseTCP)
     {
-        peerAddr = chip::Optional<chip::Transport::PeerAddress>::Value(chip::Transport::PeerAddress::TCP(gDestAddr, CHIP_PORT));
+        peerAddr = chip::Transport::PeerAddress::TCP(gDestAddr, CHIP_PORT);
     }
     else
     {
-        peerAddr = chip::Optional<chip::Transport::PeerAddress>::Value(
-            chip::Transport::PeerAddress::UDP(gDestAddr, CHIP_PORT, chip::Inet::InterfaceId::Null()));
+        peerAddr = chip::Transport::PeerAddress::UDP(gDestAddr, CHIP_PORT, chip::Inet::InterfaceId::Null());
     }
 
     // Attempt to connect to the peer.
-    err = gSessionManager.NewPairing(gSession, peerAddr, chip::kTestDeviceNodeId, testSecurePairingSecret,
-                                     chip::CryptoContext::SessionRole::kInitiator, gFabricIndex);
-
-exit:
+    CHIP_ERROR err = gSessionManager.InjectPaseSessionWithTestKey(gSession, 1, chip::kTestDeviceNodeId, 1, gFabricIndex, peerAddr,
+                                                                  chip::CryptoContext::SessionRole::kInitiator);
     if (err != CHIP_NO_ERROR)
     {
         printf("Establish secure session failed, err: %s\n", chip::ErrorStr(err));
@@ -180,10 +171,6 @@ exit:
     else
     {
         printf("Establish secure session succeeded\n");
-    }
-    if (testSecurePairingSecret)
-    {
-        chip::Platform::Delete(testSecurePairingSecret);
     }
 
     return err;
@@ -232,9 +219,6 @@ int main(int argc, char * argv[])
 
     InitializeChip();
 
-    err = gFabricTable.Init(&gStorage);
-    SuccessOrExit(err);
-
     if (gUseTCP)
     {
         err = gTCPManager.Init(chip::Transport::TcpListenParameters(chip::DeviceLayer::TCPEndPointManager())
@@ -268,7 +252,7 @@ int main(int argc, char * argv[])
     err = EstablishSecureSession();
     SuccessOrExit(err);
 
-    err = gEchoClient.Init(&gExchangeManager, gSession.Get());
+    err = gEchoClient.Init(&gExchangeManager, gSession.Get().Value());
     SuccessOrExit(err);
 
     // Arrange to get a callback whenever an Echo Response is received.

@@ -45,6 +45,7 @@
 #include <lib/support/DefaultStorageKeyAllocator.h>
 #include <lib/support/PersistedCounter.h>
 #include <lib/support/TestPersistentStorageDelegate.h>
+#include <lib/support/UnitTestContext.h>
 #include <lib/support/UnitTestRegistration.h>
 #include <platform/ConfigurationManager.h>
 #include <platform/PersistedStorage.h>
@@ -98,7 +99,7 @@ static void CheckOOB(nlTestSuite * inSuite, void * inContext)
     // a count of 0 and a value of 0x10000 for the next starting value
     // in persistent storage.
 
-    chip::PersistedCounter counter;
+    chip::PersistedCounter<uint64_t> counter;
 
     auto testKey   = &chip::DefaultStorageKeyAllocator::IMEventNumber;
     CHIP_ERROR err = counter.Init(sPersistentStore, testKey, 0x10000);
@@ -114,7 +115,7 @@ static void CheckReboot(nlTestSuite * inSuite, void * inContext)
 
     InitializePersistedStorage(context);
 
-    chip::PersistedCounter counter, counter2;
+    chip::PersistedCounter<uint64_t> counter, counter2;
 
     // When initializing the first time out of the box, we should have
     // a count of 0.
@@ -142,7 +143,7 @@ static void CheckWriteNextCounterStart(nlTestSuite * inSuite, void * inContext)
 
     InitializePersistedStorage(context);
 
-    chip::PersistedCounter counter;
+    chip::PersistedCounter<uint64_t> counter;
 
     // When initializing the first time out of the box, we should have
     // a count of 0.
@@ -190,24 +191,9 @@ static const nlTest sTests[] = {
 
 int TestPersistedCounter()
 {
-    TestPersistedCounterContext context;
-
-    CHIP_ERROR error = chip::Platform::MemoryInit();
-    if (error != CHIP_NO_ERROR)
-    {
-        return EXIT_FAILURE;
-    }
-
     nlTestSuite theSuite = { "chip-persisted-storage", &sTests[0], TestSetup, TestTeardown };
 
-    // Run test suite against one context
-    nlTestRunner(&theSuite, &context);
-
-    int r = nlTestRunnerStats(&theSuite);
-
-    chip::Platform::MemoryShutdown();
-
-    return r;
+    return chip::ExecuteTestsWithContext<TestPersistedCounterContext>(&theSuite);
 }
 
 CHIP_REGISTER_TEST_SUITE(TestPersistedCounter);

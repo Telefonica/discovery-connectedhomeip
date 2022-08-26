@@ -43,7 +43,8 @@ constexpr size_t kMaxAADLen = 128;
 constexpr uint8_t SEKeysInfo[] = { 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x73 };
 
 /* Session Resumption Key Info */
-constexpr uint8_t RSEKeysInfo[] = { 0x53, 0x69, 0x67, 0x6d, 0x61, 0x31, 0x5f, 0x52, 0x65, 0x73, 0x75, 0x6d, 0x65 };
+constexpr uint8_t RSEKeysInfo[] = { 0x53, 0x65, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x75,
+                                    0x6d, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x4b, 0x65, 0x79, 0x73 };
 
 } // namespace
 
@@ -97,9 +98,10 @@ CHIP_ERROR CryptoContext::InitFromSecret(const ByteSpan & secret, const ByteSpan
     (void) infoLen;
 
 #warning                                                                                                                           \
-    "Warning: CONFIG_SECURITY_TEST_MODE=1 bypassing key negotiation... All sessions will use known, fixed test key.  Node can only communicate with other nodes built with this flag set."
+    "Warning: CONFIG_SECURITY_TEST_MODE=1 bypassing key negotiation... All sessions will use known, fixed test key, and NodeID=0 in NONCE. Node can only communicate with other nodes built with this flag set. Requires build flag 'treat_warnings_as_errors=false'."
     ChipLogError(SecureChannel,
-                 "Warning: CONFIG_SECURITY_TEST_MODE=1 bypassing key negotiation... All sessions will use known, fixed test key.  "
+                 "Warning: CONFIG_SECURITY_TEST_MODE=1 bypassing key negotiation... All sessions will use known, fixed test key, "
+                 "and NodeID=0 in NONCE. "
                  "Node can only communicate with other nodes built with this flag set.");
 
     ReturnErrorOnFailure(mHKDF.HKDF_SHA256(kTestSharedSecret, TEST_SECRET_SIZE, testSalt.data(), testSalt.size(), SEKeysInfo,
@@ -136,8 +138,22 @@ CHIP_ERROR CryptoContext::BuildNonce(NonceView nonce, uint8_t securityFlags, uin
 
     bbuf.Put8(securityFlags);
     bbuf.Put32(messageCounter);
+#if CHIP_CONFIG_SECURITY_TEST_MODE
+    bbuf.Put64(0); // Simplifies decryption of CASE sessions when in TEST_MODE.
+#else
     bbuf.Put64(nodeId);
+#endif
 
+    return bbuf.Fit() ? CHIP_NO_ERROR : CHIP_ERROR_NO_MEMORY;
+}
+
+CHIP_ERROR CryptoContext::BuildPrivacyNonce(NonceView nonce, uint16_t sessionId, const MessageAuthenticationCode & mac)
+{
+    const uint8_t * micFragment = &mac.GetTag()[kPrivacyNonceMicFragmentOffset];
+    Encoding::BigEndian::BufferWriter bbuf(nonce.data(), nonce.size());
+
+    bbuf.Put16(sessionId);
+    bbuf.Put(micFragment, kPrivacyNonceMicFragmentLength);
     return bbuf.Fit() ? CHIP_NO_ERROR : CHIP_ERROR_NO_MEMORY;
 }
 
@@ -181,7 +197,7 @@ CHIP_ERROR CryptoContext::Encrypt(const uint8_t * input, size_t input_length, ui
         MutableByteSpan ciphertext(output, input_length);
         MutableByteSpan mic(tag, taglen);
 
-        ReturnErrorOnFailure(mKeyContext->EncryptMessage(plaintext, ByteSpan(AAD, aadLen), nonce, mic, ciphertext));
+        ReturnErrorOnFailure(mKeyContext->MessageEncrypt(plaintext, ByteSpan(AAD, aadLen), nonce, mic, ciphertext));
     }
     else
     {
@@ -225,7 +241,7 @@ CHIP_ERROR CryptoContext::Decrypt(const uint8_t * input, size_t input_length, ui
         MutableByteSpan plaintext(output, input_length);
         ByteSpan mic(tag, taglen);
 
-        CHIP_ERROR err = mKeyContext->DecryptMessage(ciphertext, ByteSpan(AAD, aadLen), nonce, mic, plaintext);
+        CHIP_ERROR err = mKeyContext->MessageDecrypt(ciphertext, ByteSpan(AAD, aadLen), nonce, mic, plaintext);
         ReturnErrorOnFailure(err);
     }
     else
@@ -245,6 +261,42 @@ CHIP_ERROR CryptoContext::Decrypt(const uint8_t * input, size_t input_length, ui
                                              Crypto::kAES_CCM128_Key_Length, nonce.data(), nonce.size(), output));
     }
     return CHIP_NO_ERROR;
+}
+
+CHIP_ERROR CryptoContext::PrivacyEncrypt(const uint8_t * input, size_t input_length, uint8_t * output, PacketHeader & header,
+                                         MessageAuthenticationCode & mac) const
+{
+    VerifyOrReturnError(input != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
+    VerifyOrReturnError(input_length > 0, CHIP_ERROR_INVALID_ARGUMENT);
+    VerifyOrReturnError(output != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
+
+    // Confirm group key is available. Privacy obfuscation is not supported on unicast session keys.
+    VerifyOrReturnError(mKeyContext != nullptr, CHIP_ERROR_INVALID_USE_OF_SESSION_KEY);
+
+    ByteSpan plaintext(input, input_length);
+    MutableByteSpan privacytext(output, input_length);
+    CryptoContext::NonceStorage privacyNonce;
+    CryptoContext::BuildPrivacyNonce(privacyNonce, header.GetSessionId(), mac);
+
+    return mKeyContext->PrivacyEncrypt(plaintext, privacyNonce, privacytext);
+}
+
+CHIP_ERROR CryptoContext::PrivacyDecrypt(const uint8_t * input, size_t input_length, uint8_t * output, const PacketHeader & header,
+                                         const MessageAuthenticationCode & mac) const
+{
+    VerifyOrReturnError(input != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
+    VerifyOrReturnError(input_length > 0, CHIP_ERROR_INVALID_ARGUMENT);
+    VerifyOrReturnError(output != nullptr, CHIP_ERROR_INVALID_ARGUMENT);
+
+    // Confirm group key is available. Privacy obfuscation is not supported on session keys.
+    VerifyOrReturnError(mKeyContext != nullptr, CHIP_ERROR_INVALID_USE_OF_SESSION_KEY);
+
+    const ByteSpan privacytext(input, input_length);
+    MutableByteSpan plaintext(output, input_length);
+    CryptoContext::NonceStorage privacyNonce;
+    CryptoContext::BuildPrivacyNonce(privacyNonce, header.GetSessionId(), mac);
+
+    return mKeyContext->PrivacyDecrypt(privacytext, privacyNonce, plaintext);
 }
 
 } // namespace chip

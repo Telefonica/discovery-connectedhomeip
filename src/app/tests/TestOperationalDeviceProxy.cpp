@@ -45,14 +45,14 @@ void TestOperationalDeviceProxy_EstablishSessionDirectly(nlTestSuite * inSuite, 
     Platform::MemoryInit();
     TestTransportMgr transportMgr;
     SessionManager sessionManager;
-    SessionResumptionStorage sessionResumptionStorage;
+    SimpleSessionResumptionStorage sessionResumptionStorage;
     ExchangeManager exchangeMgr;
     Inet::UDPEndPointManagerImpl udpEndPointManager;
     System::LayerImpl systemLayer;
     // Heap-allocate the fairly large FabricTable so we don't end up with a huge
     // stack.
-    FabricTable * fabrics = Platform::New<FabricTable>();
-    FabricInfo * fabric   = fabrics->FindFabricWithIndex(1);
+    FabricTable * fabrics     = Platform::New<FabricTable>();
+    const FabricInfo * fabric = fabrics->FindFabricWithIndex(1);
     VerifyOrDie(fabric != nullptr);
     secure_channel::MessageCounterManager messageCounterManager;
     chip::TestPersistentStorageDelegate deviceStorage;

@@ -33,7 +33,6 @@
 #include <messaging/ReliableMessageMgr.h>
 #include <protocols/Protocols.h>
 #include <transport/SessionManager.h>
-#include <transport/TransportMgr.h>
 
 namespace chip {
 namespace Messaging {
@@ -82,10 +81,8 @@ public:
      *     there are no active ExchangeContext objects. Furthermore, it is the
      *     onus of the application to de-allocate the ExchangeManager
      *     object after calling ExchangeManager::Shutdown().
-     *
-     *  @return #CHIP_NO_ERROR unconditionally.
      */
-    CHIP_ERROR Shutdown();
+    void Shutdown();
 
     /**
      *  Creates a new ExchangeContext with a given peer CHIP node specified by the peer node identifier.
@@ -227,12 +224,12 @@ private:
     uint16_t mNextKeyId;
     State mState;
 
-    SessionManager * mSessionManager;
-    ReliableMessageMgr mReliableMessageMgr;
-
     FabricIndex mFabricIndex = 0;
 
-    BitMapObjectPool<ExchangeContext, CHIP_CONFIG_MAX_EXCHANGE_CONTEXTS> mContextPool;
+    ObjectPool<ExchangeContext, CHIP_CONFIG_MAX_EXCHANGE_CONTEXTS> mContextPool;
+
+    SessionManager * mSessionManager;
+    ReliableMessageMgr mReliableMessageMgr;
 
     UnsolicitedMessageHandlerSlot UMHandlerPool[CHIP_CONFIG_MAX_UNSOLICITED_MESSAGE_HANDLERS];
 
@@ -240,8 +237,9 @@ private:
     CHIP_ERROR UnregisterUMH(Protocols::Id protocolId, int16_t msgType);
 
     void OnMessageReceived(const PacketHeader & packetHeader, const PayloadHeader & payloadHeader, const SessionHandle & session,
-                           const Transport::PeerAddress & source, DuplicateMessage isDuplicate,
-                           System::PacketBufferHandle && msgBuf) override;
+                           DuplicateMessage isDuplicate, System::PacketBufferHandle && msgBuf) override;
+    void SendStandaloneAckIfNeeded(const PacketHeader & packetHeader, const PayloadHeader & payloadHeader,
+                                   const SessionHandle & session, MessageFlags msgFlags, System::PacketBufferHandle && msgBuf);
 };
 
 } // namespace Messaging

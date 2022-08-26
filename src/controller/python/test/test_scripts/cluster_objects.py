@@ -189,6 +189,41 @@ class ClusterObjectTests:
 
     @classmethod
     @base.test_case
+    async def TestSubscribeZeroMinInterval(cls, devCtrl):
+        '''
+        This validates receiving subscription reports for two attributes at a time in quick succession after issuing a command that results in attribute side-effects.
+        Specifically, it relies on the fact that the second attribute is changed in a different execution context than the first. This ensures that we pick-up the first
+        attribute change and generate a notification, and validating that shortly after that, we generate a second report for the second change.
+
+        This is done using subscriptions with a min reporting interval of 0 to ensure timely notification of the above. An On() command is sent to the OnOff cluster
+        which should simultaneously set the state to On as well as set the level to 254.
+        '''
+        logger.info("Test Subscription With MinInterval of 0")
+        sub = await devCtrl.ReadAttribute(nodeid=NODE_ID, attributes=[Clusters.OnOff, Clusters.LevelControl], reportInterval=(0, 60))
+        data = sub.GetAttributes()
+
+        logger.info("Sending off command")
+
+        req = Clusters.OnOff.Commands.Off()
+        await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=req)
+
+        logger.info("Sending on command")
+
+        req = Clusters.OnOff.Commands.On()
+        await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=req)
+
+        # Wait for the report containing both attributes to arrive to us.
+        await asyncio.sleep(2)
+
+        logger.info("Checking read back value is indeed 254")
+
+        if (data[1][Clusters.LevelControl][Clusters.LevelControl.Attributes.CurrentLevel] != 254):
+            raise ValueError("Current Level should have been 254")
+
+        sub.Shutdown()
+
+    @classmethod
+    @base.test_case
     async def TestReadAttributeRequests(cls, devCtrl):
         '''
         Tests out various permutations of endpoint, cluster and attribute ID (with wildcards) to validate
@@ -278,8 +313,6 @@ class ClusterObjectTests:
         await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestEventRequest())
         await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestEventRequest())
         await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestEventRequest())
-        await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestFabricScopedEventRequest(arg1=0))
-        await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestFabricScopedEventRequest(arg1=1))
 
     @classmethod
     async def _RetryForContent(cls, request, until, retryCount=10, intervalSeconds=1):
@@ -295,6 +328,24 @@ class ClusterObjectTests:
     async def TriggerAndWaitForEvents(cls, devCtrl, req):
         await cls._TriggerEvent(devCtrl)
         await cls._RetryForContent(request=lambda: devCtrl.ReadEvent(nodeid=NODE_ID, events=req), until=lambda res: res != 0)
+
+    @classmethod
+    @base.test_case
+    async def TestGenerateUndefinedFabricScopedEventRequests(cls, devCtrl):
+        logger.info("Running TestGenerateUndefinedFabricScopedEventRequests")
+        try:
+            res = await devCtrl.SendCommand(nodeid=NODE_ID, endpoint=1, payload=Clusters.TestCluster.Commands.TestEmitTestFabricScopedEventRequest(arg1=0))
+            raise ValueError(f"Unexpected Failure")
+        except chip.interaction_model.InteractionModelError as ex:
+            logger.info(f"Recevied {ex} from server.")
+        res = await devCtrl.ReadEvent(nodeid=NODE_ID, events=[
+            (1, Clusters.TestCluster.Events.TestFabricScopedEvent, 0),
+        ])
+        logger.info(f"return result is {res}")
+        if len(res) != 0:
+            raise AssertionError("failure: not expect to receive fabric-scoped event when fabric is undefined")
+        else:
+            logger.info("TestGenerateUndefinedFabricScopedEventRequests: Success")
 
     @classmethod
     @base.test_case
@@ -515,12 +566,14 @@ class ClusterObjectTests:
             await cls.TestReadEventRequests(devCtrl, 1)
             await cls.TestReadWriteAttributeRequestsWithVersion(devCtrl)
             await cls.TestReadAttributeRequests(devCtrl)
+            await cls.TestSubscribeZeroMinInterval(devCtrl)
             await cls.TestSubscribeAttribute(devCtrl)
             await cls.TestMixedReadAttributeAndEvents(devCtrl)
             # Note: Write will change some attribute values, always put it after read tests
             await cls.TestWriteRequest(devCtrl)
             await cls.TestTimedRequest(devCtrl)
             await cls.TestTimedRequestTimeout(devCtrl)
+            await cls.TestGenerateUndefinedFabricScopedEventRequests(devCtrl)
         except Exception as ex:
             logger.error(
                 f"Unexpected error occurred when running tests: {ex}")

@@ -22,7 +22,7 @@
 
 namespace chip {
 
-CHIP_ERROR PendingNotificationMap::FindLRUConnectPeer(FabricIndex * fabric, NodeId * node)
+CHIP_ERROR PendingNotificationMap::FindLRUConnectPeer(ScopedNodeId & nodeId)
 {
     // When entries are added to PendingNotificationMap, they are appended to the end.
     // To find the LRU peer, we need to find the peer whose last entry in the map is closer
@@ -72,18 +72,21 @@ CHIP_ERROR PendingNotificationMap::FindLRUConnectPeer(FabricIndex * fabric, Node
     if (minLastAppearValue < UINT16_MAX)
     {
         EmberBindingTableEntry entry = BindingTable::GetInstance().GetAt(static_cast<uint8_t>(lruBindingEntryIndex));
-        *fabric                      = entry.fabricIndex;
-        *node                        = entry.nodeId;
+        nodeId                       = ScopedNodeId(entry.nodeId, entry.fabricIndex);
         return CHIP_NO_ERROR;
     }
     return CHIP_ERROR_NOT_FOUND;
 }
 
-void PendingNotificationMap::AddPendingNotification(uint8_t bindingEntryId, void * context)
+void PendingNotificationMap::AddPendingNotification(uint8_t bindingEntryId, PendingNotificationContext * context)
 {
     RemoveEntry(bindingEntryId);
     mPendingBindingEntries[mNumEntries] = bindingEntryId;
     mPendingContexts[mNumEntries]       = context;
+    if (context)
+    {
+        context->IncrementConsumersNumber();
+    }
     mNumEntries++;
 }
 
@@ -98,21 +101,29 @@ void PendingNotificationMap::RemoveEntry(uint8_t bindingEntryId)
             mPendingContexts[newEntryCount]       = mPendingContexts[i];
             newEntryCount++;
         }
+        else if (mPendingContexts[i] != nullptr)
+        {
+            mPendingContexts[i]->DecrementConsumersNumber();
+        }
     }
     mNumEntries = newEntryCount;
 }
 
-void PendingNotificationMap::RemoveAllEntriesForNode(FabricIndex fabric, NodeId node)
+void PendingNotificationMap::RemoveAllEntriesForNode(const ScopedNodeId & nodeId)
 {
     uint8_t newEntryCount = 0;
     for (int i = 0; i < mNumEntries; i++)
     {
         EmberBindingTableEntry entry = BindingTable::GetInstance().GetAt(mPendingBindingEntries[i]);
-        if (entry.fabricIndex != fabric || entry.nodeId != node)
+        if (entry.fabricIndex != nodeId.GetFabricIndex() || entry.nodeId != nodeId.GetNodeId())
         {
             mPendingBindingEntries[newEntryCount] = mPendingBindingEntries[i];
             mPendingContexts[newEntryCount]       = mPendingContexts[i];
             newEntryCount++;
+        }
+        else if (mPendingContexts[i] != nullptr)
+        {
+            mPendingContexts[i]->DecrementConsumersNumber();
         }
     }
     mNumEntries = newEntryCount;
@@ -129,6 +140,10 @@ void PendingNotificationMap::RemoveAllEntriesForFabric(FabricIndex fabric)
             mPendingBindingEntries[newEntryCount] = mPendingBindingEntries[i];
             mPendingContexts[newEntryCount]       = mPendingContexts[i];
             newEntryCount++;
+        }
+        else if (mPendingContexts[i] != nullptr)
+        {
+            mPendingContexts[i]->DecrementConsumersNumber();
         }
     }
     mNumEntries = newEntryCount;

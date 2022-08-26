@@ -24,12 +24,16 @@
 #include <app/clusters/keypad-input-server/keypad-input-delegate.h>
 #include <app/clusters/keypad-input-server/keypad-input-server.h>
 
+#include <app-common/zap-generated/attributes/Accessors.h>
+#include <app/AttributeAccessInterface.h>
 #include <app/CommandHandler.h>
 #include <app/ConcreteCommandPath.h>
 #if CHIP_DEVICE_CONFIG_APP_PLATFORM_ENABLED
 #include <app/app-platform/ContentAppPlatform.h>
 #endif // CHIP_DEVICE_CONFIG_APP_PLATFORM_ENABLED
 #include <app/data-model/Encode.h>
+#include <app/util/af.h>
+#include <app/util/attribute-storage.h>
 #include <platform/CHIPDeviceConfig.h>
 
 using namespace chip;
@@ -57,11 +61,11 @@ Delegate * GetDelegate(EndpointId endpoint)
     ContentApp * app = ContentAppPlatform::GetInstance().GetContentApp(endpoint);
     if (app != nullptr)
     {
-        ChipLogError(Zcl, "KeypadInput returning ContentApp delegate for endpoint:%" PRIu16, endpoint);
+        ChipLogProgress(Zcl, "KeypadInput returning ContentApp delegate for endpoint:%u", endpoint);
         return app->GetKeypadInputDelegate();
     }
 #endif // CHIP_DEVICE_CONFIG_APP_PLATFORM_ENABLED
-    ChipLogError(Zcl, "KeypadInput NOT returning ContentApp delegate for endpoint:%" PRIu16, endpoint);
+    ChipLogProgress(Zcl, "KeypadInput NOT returning ContentApp delegate for endpoint:%u", endpoint);
 
     uint16_t ep = emberAfFindClusterServerEndpointIndex(endpoint, KeypadInput::Id);
     return ((ep == 0xFFFF || ep >= EMBER_AF_KEYPAD_INPUT_CLUSTER_SERVER_ENDPOINT_COUNT) ? nullptr : gDelegateTable[ep]);
@@ -71,7 +75,7 @@ bool isDelegateNull(Delegate * delegate, EndpointId endpoint)
 {
     if (delegate == nullptr)
     {
-        ChipLogError(Zcl, "Keypad Input has no delegate set for endpoint:%" PRIu16, endpoint);
+        ChipLogProgress(Zcl, "Keypad Input has no delegate set for endpoint:%u", endpoint);
         return true;
     }
     return false;
@@ -96,10 +100,67 @@ void SetDefaultDelegate(EndpointId endpoint, Delegate * delegate)
     }
 }
 
+bool Delegate::HasFeature(chip::EndpointId endpoint, KeypadInputFeature feature)
+{
+    uint32_t featureMap = GetFeatureMap(endpoint);
+    return (featureMap & chip::to_underlying(feature));
+}
+
 } // namespace KeypadInput
 } // namespace Clusters
 } // namespace app
 } // namespace chip
+
+// -----------------------------------------------------------------------------
+// Attribute Accessor Implementation
+
+namespace {
+
+class KeypadInputAttrAccess : public app::AttributeAccessInterface
+{
+public:
+    KeypadInputAttrAccess() : app::AttributeAccessInterface(Optional<EndpointId>::Missing(), KeypadInput::Id) {}
+
+    CHIP_ERROR Read(const app::ConcreteReadAttributePath & aPath, app::AttributeValueEncoder & aEncoder) override;
+
+private:
+    CHIP_ERROR ReadFeatureFlagAttribute(EndpointId endpoint, app::AttributeValueEncoder & aEncoder, Delegate * delegate);
+};
+
+KeypadInputAttrAccess gKeypadInputAttrAccess;
+
+CHIP_ERROR KeypadInputAttrAccess::Read(const app::ConcreteReadAttributePath & aPath, app::AttributeValueEncoder & aEncoder)
+{
+    EndpointId endpoint = aPath.mEndpointId;
+    Delegate * delegate = GetDelegate(endpoint);
+
+    if (isDelegateNull(delegate, endpoint))
+    {
+        return CHIP_NO_ERROR;
+    }
+
+    switch (aPath.mAttributeId)
+    {
+    case app::Clusters::KeypadInput::Attributes::FeatureMap::Id: {
+        return ReadFeatureFlagAttribute(endpoint, aEncoder, delegate);
+    }
+
+    default: {
+        break;
+    }
+    }
+
+    return CHIP_NO_ERROR;
+}
+
+CHIP_ERROR KeypadInputAttrAccess::ReadFeatureFlagAttribute(EndpointId endpoint, app::AttributeValueEncoder & aEncoder,
+                                                           Delegate * delegate)
+{
+    uint32_t featureFlag = delegate->GetFeatureMap(endpoint);
+    return aEncoder.Encode(featureFlag);
+}
+
+} // anonymous namespace
 
 // -----------------------------------------------------------------------------
 // Matter Framework Callbacks Implementation
@@ -127,4 +188,7 @@ exit:
     return true;
 }
 
-void MatterKeypadInputPluginServerInitCallback() {}
+void MatterKeypadInputPluginServerInitCallback()
+{
+    registerAttributeAccessOverride(&gKeypadInputAttrAccess);
+}

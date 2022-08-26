@@ -21,10 +21,14 @@
 #include <LEDWidget.h>
 #include <WindowApp.h>
 #include <queue.h>
+#include <setup_payload/QRCodeSetupPayloadGenerator.h>
 #include <sl_simple_button_instances.h>
 #include <string>
 #include <task.h>
 #include <timers.h>
+#ifdef DISPLAY_ENABLED
+#include <LcdPainter.h>
+#endif
 
 class WindowAppImpl : public WindowApp
 {
@@ -77,7 +81,11 @@ private:
     QueueHandle_t mQueue = nullptr;
     LEDWidget mStatusLED;
     LEDWidget mActionLED;
-    std::string mQRCode;
+
+    // Get QR Code and emulate its content using NFC tag
+    char mQRCodeBuffer[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38RepresentationLength + 1];
+#ifdef DISPLAY_ENABLED
     Timer mIconTimer;
     LcdIcon mIcon = LcdIcon::None;
+#endif
 };

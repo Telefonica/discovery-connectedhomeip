@@ -107,7 +107,7 @@ bool ColorControlServer::shouldExecuteIfOff(EndpointId endpoint, uint8_t optionM
     }
 
     uint8_t options = 0x00;
-    Attributes::ColorControlOptions::Get(endpoint, &options);
+    Attributes::Options::Get(endpoint, &options);
 
     bool on = true;
     OnOff::Attributes::OnOff::Get(endpoint, &on);
@@ -1975,16 +1975,16 @@ ColorControlServer::Color16uTransitionState * ColorControlServer::getTempTransit
  */
 EmberAfStatus ColorControlServer::moveToColorTemp(EndpointId aEndpoint, uint16_t colorTemperature, uint16_t transitionTime)
 {
-    EndpointId endpoint = emberAfCurrentEndpoint();
+    EndpointId endpoint = aEndpoint;
 
     Color16uTransitionState * colorTempTransitionState = getTempTransitionState(endpoint);
     VerifyOrReturnError(colorTempTransitionState != nullptr, EMBER_ZCL_STATUS_UNSUPPORTED_ENDPOINT);
 
     uint16_t temperatureMin = MIN_TEMPERATURE_VALUE;
-    Attributes::ColorTempPhysicalMin::Get(endpoint, &temperatureMin);
+    Attributes::ColorTempPhysicalMinMireds::Get(endpoint, &temperatureMin);
 
     uint16_t temperatureMax = MAX_TEMPERATURE_VALUE;
-    Attributes::ColorTempPhysicalMax::Get(endpoint, &temperatureMax);
+    Attributes::ColorTempPhysicalMaxMireds::Get(endpoint, &temperatureMax);
 
     if (transitionTime == 0)
     {
@@ -2039,7 +2039,7 @@ uint16_t ColorControlServer::getTemperatureCoupleToLevelMin(EndpointId endpoint)
     if (status != EMBER_ZCL_STATUS_SUCCESS)
     {
         // Not less than the physical min.
-        Attributes::ColorTempPhysicalMin::Get(endpoint, &colorTemperatureCoupleToLevelMin);
+        Attributes::ColorTempPhysicalMinMireds::Get(endpoint, &colorTemperatureCoupleToLevelMin);
     }
 
     return colorTemperatureCoupleToLevelMin;
@@ -2071,13 +2071,13 @@ void ColorControlServer::startUpColorTempCommand(EndpointId endpoint)
     // the StartUpColorTemperatureMireds attribute are listed in the table below.
     // Value                Action on power up
     // 0x0000-0xffef        Set the ColorTemperatureMireds attribute to this value.
-    // 0xffff               Set the ColorTemperatureMireds attribute to its previous value.
+    // null                 Set the ColorTemperatureMireds attribute to its previous value.
 
-    // Initialize startUpColorTempMireds to "maintain previous value" value 0xFFFF
-    uint16_t startUpColorTemp = 0xFFFF;
-    EmberAfStatus status      = Attributes::StartUpColorTemperatureMireds::Get(endpoint, &startUpColorTemp);
+    // Initialize startUpColorTempMireds to "maintain previous value" value null
+    app::DataModel::Nullable<uint16_t> startUpColorTemp;
+    EmberAfStatus status = Attributes::StartUpColorTemperatureMireds::Get(endpoint, startUpColorTemp);
 
-    if (status == EMBER_ZCL_STATUS_SUCCESS)
+    if (status == EMBER_ZCL_STATUS_SUCCESS && !startUpColorTemp.IsNull())
     {
         uint16_t updatedColorTemp = MAX_TEMPERATURE_VALUE;
         status                    = Attributes::ColorTemperature::Get(endpoint, &updatedColorTemp);
@@ -2085,18 +2085,18 @@ void ColorControlServer::startUpColorTempCommand(EndpointId endpoint)
         if (status == EMBER_ZCL_STATUS_SUCCESS)
         {
             uint16_t tempPhysicalMin = MIN_TEMPERATURE_VALUE;
-            Attributes::ColorTempPhysicalMin::Get(endpoint, &tempPhysicalMin);
+            Attributes::ColorTempPhysicalMinMireds::Get(endpoint, &tempPhysicalMin);
 
             uint16_t tempPhysicalMax = MAX_TEMPERATURE_VALUE;
-            Attributes::ColorTempPhysicalMax::Get(endpoint, &tempPhysicalMax);
+            Attributes::ColorTempPhysicalMaxMireds::Get(endpoint, &tempPhysicalMax);
 
-            if (tempPhysicalMin <= startUpColorTemp && startUpColorTemp <= tempPhysicalMax)
+            if (tempPhysicalMin <= startUpColorTemp.Value() && startUpColorTemp.Value() <= tempPhysicalMax)
             {
                 // Apply valid startup color temp value that is within physical limits of device.
                 // Otherwise, the startup value is outside the device's supported range, and the
                 // existing setting of ColorTemp attribute will be left unchanged (i.e., treated as
-                // if startup color temp was set to 0xFFFF).
-                updatedColorTemp = startUpColorTemp;
+                // if startup color temp was set to null).
+                updatedColorTemp = startUpColorTemp.Value();
                 status           = Attributes::ColorTemperature::Set(endpoint, updatedColorTemp);
 
                 if (status == EMBER_ZCL_STATUS_SUCCESS)
@@ -2158,8 +2158,8 @@ bool ColorControlServer::moveColorTempCommand(const app::ConcreteCommandPath & c
 {
     uint8_t moveMode                 = commandData.moveMode;
     uint16_t rate                    = commandData.rate;
-    uint16_t colorTemperatureMinimum = commandData.colorTemperatureMinimum;
-    uint16_t colorTemperatureMaximum = commandData.colorTemperatureMaximum;
+    uint16_t colorTemperatureMinimum = commandData.colorTemperatureMinimumMireds;
+    uint16_t colorTemperatureMaximum = commandData.colorTemperatureMaximumMireds;
     uint8_t optionsMask              = commandData.optionsMask;
     uint8_t optionsOverride          = commandData.optionsOverride;
     EndpointId endpoint              = commandPath.mEndpointId;
@@ -2177,8 +2177,8 @@ bool ColorControlServer::moveColorTempCommand(const app::ConcreteCommandPath & c
         return true;
     }
 
-    Attributes::ColorTempPhysicalMin::Get(endpoint, &tempPhysicalMin);
-    Attributes::ColorTempPhysicalMax::Get(endpoint, &tempPhysicalMax);
+    Attributes::ColorTempPhysicalMinMireds::Get(endpoint, &tempPhysicalMin);
+    Attributes::ColorTempPhysicalMaxMireds::Get(endpoint, &tempPhysicalMax);
 
     // New command.  Need to stop any active transitions.
     stopAllColorTransitions(endpoint);
@@ -2278,8 +2278,8 @@ bool ColorControlServer::stepColorTempCommand(const app::ConcreteCommandPath & c
     uint8_t stepMode                 = commandData.stepMode;
     uint16_t stepSize                = commandData.stepSize;
     uint16_t transitionTime          = commandData.transitionTime;
-    uint16_t colorTemperatureMinimum = commandData.colorTemperatureMinimum;
-    uint16_t colorTemperatureMaximum = commandData.colorTemperatureMaximum;
+    uint16_t colorTemperatureMinimum = commandData.colorTemperatureMinimumMireds;
+    uint16_t colorTemperatureMaximum = commandData.colorTemperatureMaximumMireds;
     uint8_t optionsMask              = commandData.optionsMask;
     uint8_t optionsOverride          = commandData.optionsOverride;
     EndpointId endpoint              = commandPath.mEndpointId;
@@ -2296,9 +2296,8 @@ bool ColorControlServer::stepColorTempCommand(const app::ConcreteCommandPath & c
         return true;
     }
 
-    Attributes::ColorTempPhysicalMin::Get(endpoint, &tempPhysicalMin);
-
-    Attributes::ColorTempPhysicalMax::Get(endpoint, &tempPhysicalMax);
+    Attributes::ColorTempPhysicalMinMireds::Get(endpoint, &tempPhysicalMin);
+    Attributes::ColorTempPhysicalMaxMireds::Get(endpoint, &tempPhysicalMax);
 
     if (transitionTime == 0)
     {
@@ -2416,27 +2415,32 @@ void ColorControlServer::levelControlColorTempChangeCommand(EndpointId endpoint)
     {
         uint16_t tempCoupleMin = getTemperatureCoupleToLevelMin(endpoint);
 
-        uint8_t currentLevel = 0x7F;
-        LevelControl::Attributes::CurrentLevel::Get(endpoint, &currentLevel);
+        app::DataModel::Nullable<uint8_t> currentLevel;
+        EmberAfStatus status = LevelControl::Attributes::CurrentLevel::Get(endpoint, currentLevel);
+
+        if (status != EMBER_ZCL_STATUS_SUCCESS || currentLevel.IsNull())
+        {
+            currentLevel.SetNonNull((uint8_t) 0x7F);
+        }
 
         uint16_t tempPhysMax = MAX_TEMPERATURE_VALUE;
-        Attributes::ColorTempPhysicalMax::Get(endpoint, &tempPhysMax);
+        Attributes::ColorTempPhysicalMaxMireds::Get(endpoint, &tempPhysMax);
 
         // Scale color temp setting between the coupling min and the physical max.
         // Note that mireds varies inversely with level: low level -> high mireds.
         // Peg min/MAX level to MAX/min mireds, otherwise interpolate.
         uint16_t newColorTemp;
-        if (currentLevel <= MIN_CURRENT_LEVEL)
+        if (currentLevel.Value() <= MIN_CURRENT_LEVEL)
         {
             newColorTemp = tempPhysMax;
         }
-        else if (currentLevel >= MAX_CURRENT_LEVEL)
+        else if (currentLevel.Value() >= MAX_CURRENT_LEVEL)
         {
             newColorTemp = tempCoupleMin;
         }
         else
         {
-            uint32_t tempDelta = (((uint32_t) tempPhysMax - (uint32_t) tempCoupleMin) * currentLevel) /
+            uint32_t tempDelta = (((uint32_t) tempPhysMax - (uint32_t) tempCoupleMin) * currentLevel.Value()) /
                 (uint32_t)(MAX_CURRENT_LEVEL - MIN_CURRENT_LEVEL + 1);
             newColorTemp = (uint16_t)((uint32_t) tempPhysMax - tempDelta);
         }
@@ -2451,12 +2455,6 @@ void ColorControlServer::levelControlColorTempChangeCommand(EndpointId endpoint)
 /**********************************************************
  * Callbacks Implementation
  *********************************************************/
-
-void emberAfPluginColorControlServerStopTransition(void)
-{
-    EndpointId endpoint = emberAfCurrentEndpoint();
-    ColorControlServer::Instance().stopAllColorTransitions(endpoint);
-}
 
 #ifdef EMBER_AF_PLUGIN_COLOR_CONTROL_SERVER_HSV
 

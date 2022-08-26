@@ -79,6 +79,38 @@ CHIP_ERROR AmebaOTAImageProcessor::ProcessBlock(ByteSpan & block)
     return CHIP_NO_ERROR;
 }
 
+bool AmebaOTAImageProcessor::IsFirstImageRun()
+{
+    OTARequestorInterface * requestor = chip::GetRequestorInstance();
+    if (requestor == nullptr)
+    {
+        return false;
+    }
+
+    return requestor->GetCurrentUpdateState() == OTARequestorInterface::OTAUpdateStateEnum::kApplying;
+}
+
+CHIP_ERROR AmebaOTAImageProcessor::ConfirmCurrentImage()
+{
+    OTARequestorInterface * requestor = chip::GetRequestorInstance();
+    if (requestor == nullptr)
+    {
+        return CHIP_ERROR_INTERNAL;
+    }
+
+    uint32_t currentVersion;
+    uint32_t targetVersion = requestor->GetTargetVersion();
+    ReturnErrorOnFailure(DeviceLayer::ConfigurationMgr().GetSoftwareVersion(currentVersion));
+    if (currentVersion != targetVersion)
+    {
+        ChipLogError(SoftwareUpdate, "Current software version = %" PRIu32 ", expected software version = %" PRIu32, currentVersion,
+                     targetVersion);
+        return CHIP_ERROR_INCORRECT_STATE;
+    }
+
+    return CHIP_NO_ERROR;
+}
+
 void AmebaOTAImageProcessor::HandlePrepareDownload(intptr_t context)
 {
     auto * imageProcessor = reinterpret_cast<AmebaOTAImageProcessor *>(context);
@@ -129,25 +161,6 @@ void AmebaOTAImageProcessor::HandleFinalize(intptr_t context)
     }
 #endif
 
-    // Update signature
-#if defined(CONFIG_PLATFORM_8721D)
-    if (change_ota_signature(imageProcessor->pOtaTgtHdr, imageProcessor->ota_target_index) != 1)
-    {
-        ota_update_free(imageProcessor->pOtaTgtHdr);
-        ChipLogError(SoftwareUpdate, "OTA update signature failed");
-        return;
-    }
-#elif defined(CONFIG_PLATFORM_8710C)
-    if (update_ota_signature(imageProcessor->signature, imageProcessor->flash_addr) < 0)
-    {
-        ChipLogError(SoftwareUpdate, "OTA update signature failed");
-        return;
-    }
-#endif
-
-#if defined(CONFIG_PLATFORM_8721D)
-    ota_update_free(imageProcessor->pOtaTgtHdr);
-#endif
     imageProcessor->ReleaseBlock();
 
     ChipLogProgress(SoftwareUpdate, "OTA image downloaded and written to flash");
@@ -163,6 +176,23 @@ void AmebaOTAImageProcessor::HandleAbort(intptr_t context)
     }
 
     // Abort OTA procedure
+#if defined(CONFIG_PLATFORM_8721D)
+    ChipLogProgress(SoftwareUpdate, "Erasing target partition...");
+    erase_ota_target_flash(imageProcessor->pOtaTgtHdr->FileImgHdr[0].FlashAddr, imageProcessor->pOtaTgtHdr->FileImgHdr[0].ImgLen);
+    ChipLogProgress(SoftwareUpdate, "Erased partition OTA%d", imageProcessor->ota_target_index + 1);
+#elif defined(CONFIG_PLATFORM_8710C)
+    ChipLogProgress(SoftwareUpdate, "Erasing partition");
+    imageProcessor->NewFWBlkSize = ((0x1AC000 - 1) / 4096) + 1; // Use a fixed image length of 0x1AC000, change in the future
+    ChipLogProgress(SoftwareUpdate, "Erasing %d sectors", imageProcessor->NewFWBlkSize);
+    device_mutex_lock(RT_DEV_LOCK_FLASH);
+    for (int i = 0; i < imageProcessor->NewFWBlkSize; i++)
+        flash_erase_sector(&flash_ota, imageProcessor->flash_addr + i * 4096);
+    device_mutex_unlock(RT_DEV_LOCK_FLASH);
+#endif
+
+#if defined(CONFIG_PLATFORM_8721D)
+    ota_update_free(imageProcessor->pOtaTgtHdr);
+#endif
 
     imageProcessor->ReleaseBlock();
 }
@@ -290,7 +320,8 @@ void AmebaOTAImageProcessor::HandleProcessBlock(intptr_t context)
 
             // Erase target partition
             ChipLogProgress(SoftwareUpdate, "Erasing partition");
-            imageProcessor->NewFWBlkSize = ((0x1F8000 - 1) / 4096) + 1; // Use a fixed image length of 0xF8000, change in the future
+            imageProcessor->NewFWBlkSize =
+                ((0x1AC000 - 1) / 4096) + 1; // Use a fixed image length of 0x1AC000, change in the future
             ChipLogProgress(SoftwareUpdate, "Erasing %d sectors", imageProcessor->NewFWBlkSize);
             device_mutex_lock(RT_DEV_LOCK_FLASH);
             for (int i = 0; i < imageProcessor->NewFWBlkSize; i++)
@@ -368,18 +399,38 @@ void AmebaOTAImageProcessor::HandleApply(intptr_t context)
     auto * imageProcessor = reinterpret_cast<AmebaOTAImageProcessor *>(context);
     if (imageProcessor == nullptr)
     {
+        ChipLogError(SoftwareUpdate, "ImageProcessor context is null");
         return;
     }
 
-    OTARequestorInterface * requestor = chip::GetRequestorInstance();
-    if (requestor != nullptr)
+    // Update signature
+#if defined(CONFIG_PLATFORM_8721D)
+    if (change_ota_signature(imageProcessor->pOtaTgtHdr, imageProcessor->ota_target_index) != 1)
     {
-        // TODO: Implement restarting into new image instead of changing the version
-        DeviceLayer::ConfigurationMgr().StoreSoftwareVersion(imageProcessor->mSoftwareVersion);
-        requestor->NotifyUpdateApplied();
+        ota_update_free(imageProcessor->pOtaTgtHdr);
+        ChipLogError(SoftwareUpdate, "OTA update signature failed");
+        return;
     }
+#elif defined(CONFIG_PLATFORM_8710C)
+    if (update_ota_signature(imageProcessor->signature, imageProcessor->flash_addr) < 0)
+    {
+        ChipLogError(SoftwareUpdate, "OTA update signature failed");
+        return;
+    }
+#endif
 
-    // Reboot
+#if defined(CONFIG_PLATFORM_8721D)
+    ota_update_free(imageProcessor->pOtaTgtHdr);
+#endif
+
+    ChipLogProgress(SoftwareUpdate, "Rebooting in 10 seconds...");
+
+    // Delay action time before calling HandleRestart
+    chip::DeviceLayer::SystemLayer().StartTimer(chip::System::Clock::Milliseconds32(10 * 1000), HandleRestart, nullptr);
+}
+
+void AmebaOTAImageProcessor::HandleRestart(chip::System::Layer * systemLayer, void * appState)
+{
     ota_platform_reset();
 }
 

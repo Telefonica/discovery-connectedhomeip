@@ -26,10 +26,6 @@
 #include <lib/support/logging/CHIPLogging.h>
 #include <platform/Linux/NetworkCommissioningDriver.h>
 
-#if defined(PW_RPC_ENABLED)
-#include "Rpc.h"
-#endif // PW_RPC_ENABLED
-
 using namespace chip;
 using namespace chip::app;
 using namespace chip::app::Clusters;
@@ -41,8 +37,8 @@ Clusters::NetworkCommissioning::Instance sWiFiNetworkCommissioningInstance(0, &s
 } // namespace
 #endif
 
-void MatterPostAttributeChangeCallback(const chip::app::ConcreteAttributePath & attributePath, uint8_t mask, uint8_t type,
-                                       uint16_t size, uint8_t * value)
+void MatterPostAttributeChangeCallback(const chip::app::ConcreteAttributePath & attributePath, uint8_t type, uint16_t size,
+                                       uint8_t * value)
 {
     if (attributePath.mClusterId == OnOff::Id && attributePath.mAttributeId == OnOff::Attributes::OnOff::Id)
     {
@@ -79,10 +75,6 @@ void ApplicationInit()
 
 int main(int argc, char * argv[])
 {
-#if PW_RPC_ENABLED
-    chip::rpc::Init();
-#endif
-
     if (ChipLinuxAppInit(argc, argv) != 0)
     {
         return -1;

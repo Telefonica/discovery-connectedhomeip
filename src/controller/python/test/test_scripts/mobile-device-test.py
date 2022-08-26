@@ -67,25 +67,32 @@ def ethernet_commissioning(test: BaseTestHelper, discriminator: int, setup_pin: 
 
     if address_override:
         address = address_override
-    else:
-        address = address.decode("utf-8")
 
-    logger.info("Testing key exchange")
-    FailIfNot(test.TestKeyExchange(ip=address,
-                                   setuppin=setup_pin,
-                                   nodeid=device_nodeid),
+    logger.info("Testing commissioning")
+    FailIfNot(test.TestCommissioning(ip=address,
+                                     setuppin=setup_pin,
+                                     nodeid=device_nodeid),
               "Failed to finish key exchange")
+
+    logger.info("Testing multi-controller setup on the same fabric")
+    FailIfNot(asyncio.run(test.TestMultiControllerFabric(nodeid=device_nodeid)), "Failed the multi-controller test")
+
+    logger.info("Testing CATs used on controllers")
+    FailIfNot(asyncio.run(test.TestControllerCATValues(nodeid=device_nodeid)), "Failed the controller CAT test")
 
     ok = asyncio.run(test.TestMultiFabric(ip=address,
                                           setuppin=20202021,
                                           nodeid=1))
     FailIfNot(ok, "Failed to commission multi-fabric")
-    #
-    # The server will crash if we are aborting / closing it too fast.
-    # Issue: #15987
-    # logger.info("Testing closing sessions")
-    # FailIfNot(test.TestCloseSession(nodeid=device_nodeid),
-    #           "Failed to close sessions")
+
+    FailIfNot(asyncio.run(test.TestAddUpdateRemoveFabric(nodeid=device_nodeid)),
+              "Failed AddUpdateRemoveFabric test")
+
+    logger.info("Testing CASE Eviction")
+    FailIfNot(asyncio.run(test.TestCaseEviction(device_nodeid)), "Failed TestCaseEviction")
+
+    logger.info("Testing closing sessions")
+    FailIfNot(test.TestCloseSession(nodeid=device_nodeid), "Failed to close sessions")
 
 
 @base.test_case
@@ -138,6 +145,10 @@ def TestDatamodel(test: BaseTestHelper, device_nodeid: int):
     logger.info("Testing another subscription that kills previous subscriptions")
     FailIfNot(test.TestSubscription(nodeid=device_nodeid, endpoint=LIGHTING_ENDPOINT_ID),
               "Failed to subscribe attributes.")
+
+    logger.info("Testing re-subscription")
+    FailIfNot(asyncio.run(test.TestResubscription(nodeid=device_nodeid)),
+              "Failed to validated re-subscription")
 
     logger.info("Testing on off cluster over resolved connection")
     FailIfNot(test.TestOnOffCluster(nodeid=device_nodeid,

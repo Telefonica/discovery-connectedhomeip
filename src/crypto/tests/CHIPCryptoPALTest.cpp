@@ -18,7 +18,6 @@
 #include "TestCryptoLayer.h"
 
 #include "AES_CCM_128_test_vectors.h"
-#include "AES_CCM_256_test_vectors.h"
 #include "DerSigConversion_test_vectors.h"
 #include "ECDH_P256_test_vectors.h"
 #include "HKDF_SHA256_test_vectors.h"
@@ -54,10 +53,6 @@
 
 #include <lib/support/BytesToHex.h>
 
-#if CHIP_CRYPTO_OPENSSL
-#include "X509_PKCS7Extraction_test_vectors.h"
-#endif
-
 #if CHIP_CRYPTO_MBEDTLS
 #include <mbedtls/memory_buffer_alloc.h>
 #endif
@@ -68,8 +63,19 @@
 
 #define HSM_ECC_KEYID 0x11223344
 
+#include <lib/asn1/ASN1.h>
+#include <lib/asn1/ASN1Macros.h>
+#include <lib/core/CHIPTLV.h>
+
+#include <fcntl.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 using namespace chip;
 using namespace chip::Crypto;
+using namespace chip::TLV;
 
 namespace {
 
@@ -153,244 +159,6 @@ static int test_entropy_source(void * data, uint8_t * output, size_t len, size_t
     *olen = len;
     gs_test_entropy_source_called++;
     return 0;
-}
-
-static void TestAES_CCM_256EncryptTestVectors(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_ct;
-            uint8_t * out_ct_ptr = nullptr;
-            if (vector->ct_len > 0)
-            {
-                out_ct.Alloc(vector->ct_len);
-                NL_TEST_ASSERT(inSuite, out_ct);
-                out_ct_ptr = out_ct.Get();
-            }
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_tag;
-            out_tag.Alloc(vector->tag_len);
-            NL_TEST_ASSERT(inSuite, out_tag);
-
-            CHIP_ERROR err = AES_CCM_encrypt(vector->pt, vector->pt_len, vector->aad, vector->aad_len, vector->key, vector->key_len,
-                                             vector->nonce, vector->nonce_len, out_ct_ptr, out_tag.Get(), vector->tag_len);
-            NL_TEST_ASSERT(inSuite, err == vector->result);
-
-            if (vector->result == CHIP_NO_ERROR)
-            {
-                bool areCTsEqual  = memcmp(out_ct.Get(), vector->ct, vector->ct_len) == 0;
-                bool areTagsEqual = memcmp(out_tag.Get(), vector->tag, vector->tag_len) == 0;
-                NL_TEST_ASSERT(inSuite, areCTsEqual);
-                NL_TEST_ASSERT(inSuite, areTagsEqual);
-
-                if (!areCTsEqual)
-                {
-                    printf("\n Test %d failed due to mismatching ciphertext", vector->tcId);
-                }
-                if (!areTagsEqual)
-                {
-                    printf("\n Test %d failed due to mismatching tags", vector->tcId);
-                }
-            }
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256DecryptTestVectors(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_pt;
-            uint8_t * out_pt_ptr = nullptr;
-            if (vector->pt_len > 0)
-            {
-                out_pt.Alloc(vector->pt_len);
-                NL_TEST_ASSERT(inSuite, out_pt);
-                out_pt_ptr = out_pt.Get();
-            }
-            CHIP_ERROR err = AES_CCM_decrypt(vector->ct, vector->ct_len, vector->aad, vector->aad_len, vector->tag, vector->tag_len,
-                                             vector->key, vector->key_len, vector->nonce, vector->nonce_len, out_pt_ptr);
-
-            NL_TEST_ASSERT(inSuite, err == vector->result);
-
-            if (vector->result == CHIP_NO_ERROR)
-            {
-                bool arePTsEqual = memcmp(vector->pt, out_pt.Get(), vector->pt_len) == 0;
-                NL_TEST_ASSERT(inSuite, arePTsEqual);
-                if (!arePTsEqual)
-                {
-                    printf("\n Test %d failed due to mismatching plaintext", vector->tcId);
-                }
-            }
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256EncryptNilKey(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_ct;
-            out_ct.Alloc(vector->ct_len);
-            NL_TEST_ASSERT(inSuite, out_ct);
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_tag;
-            out_tag.Alloc(vector->tag_len);
-            NL_TEST_ASSERT(inSuite, out_tag);
-
-            CHIP_ERROR err = AES_CCM_encrypt(vector->pt, vector->pt_len, vector->aad, vector->aad_len, nullptr, 32, vector->nonce,
-                                             vector->nonce_len, out_ct.Get(), out_tag.Get(), vector->tag_len);
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-            break;
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256EncryptInvalidNonceLen(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_ct;
-            out_ct.Alloc(vector->ct_len);
-            NL_TEST_ASSERT(inSuite, out_ct);
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_tag;
-            out_tag.Alloc(vector->tag_len);
-            NL_TEST_ASSERT(inSuite, out_tag);
-
-            CHIP_ERROR err = AES_CCM_encrypt(vector->pt, vector->pt_len, vector->aad, vector->aad_len, vector->key, vector->key_len,
-                                             vector->nonce, 0, out_ct.Get(), out_tag.Get(), vector->tag_len);
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-            break;
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256EncryptInvalidTagLen(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_ct;
-            out_ct.Alloc(vector->ct_len);
-            NL_TEST_ASSERT(inSuite, out_ct);
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_tag;
-            out_tag.Alloc(vector->tag_len);
-            NL_TEST_ASSERT(inSuite, out_tag);
-
-            CHIP_ERROR err = AES_CCM_encrypt(vector->pt, vector->pt_len, vector->aad, vector->aad_len, vector->key, vector->key_len,
-                                             vector->nonce, vector->nonce_len, out_ct.Get(), out_tag.Get(), 13);
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-            break;
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256DecryptInvalidKey(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_pt;
-            out_pt.Alloc(vector->pt_len);
-            NL_TEST_ASSERT(inSuite, out_pt);
-            CHIP_ERROR err = AES_CCM_decrypt(vector->ct, vector->ct_len, vector->aad, vector->aad_len, vector->tag, vector->tag_len,
-                                             nullptr, 32, vector->nonce, vector->nonce_len, out_pt.Get());
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-            break;
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256DecryptInvalidNonceLen(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_pt;
-            out_pt.Alloc(vector->pt_len);
-            NL_TEST_ASSERT(inSuite, out_pt);
-            CHIP_ERROR err = AES_CCM_decrypt(vector->ct, vector->ct_len, vector->aad, vector->aad_len, vector->tag, vector->tag_len,
-                                             vector->key, vector->key_len, vector->nonce, 0, out_pt.Get());
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-            break;
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
-}
-
-static void TestAES_CCM_256DecryptInvalidTestVectors(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    int numOfTestVectors = ArraySize(ccm_invalid_test_vectors);
-    int numOfTestsRan    = 0;
-    for (int vectorIndex = 0; vectorIndex < numOfTestVectors; vectorIndex++)
-    {
-        const ccm_test_vector * vector = ccm_invalid_test_vectors[vectorIndex];
-        if (vector->key_len == 32 && vector->pt_len > 0)
-        {
-            numOfTestsRan++;
-            chip::Platform::ScopedMemoryBuffer<uint8_t> out_pt;
-            out_pt.Alloc(vector->pt_len);
-            NL_TEST_ASSERT(inSuite, out_pt);
-            CHIP_ERROR err = AES_CCM_decrypt(vector->ct, vector->ct_len, vector->aad, vector->aad_len, vector->tag, vector->tag_len,
-                                             vector->key, vector->key_len, vector->nonce, vector->nonce_len, out_pt.Get());
-
-            bool arePTsEqual = memcmp(vector->pt, out_pt.Get(), vector->pt_len) == 0;
-            NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INTERNAL);
-            NL_TEST_ASSERT(inSuite, arePTsEqual == false);
-        }
-    }
-    NL_TEST_ASSERT(inSuite, numOfTestsRan > 0);
 }
 
 static void TestAES_CCM_128EncryptTestVectors(nlTestSuite * inSuite, void * inContext)
@@ -987,9 +755,9 @@ static void TestECDSA_Signing_SHA256_Msg(nlTestSuite * inSuite, void * inContext
 static void TestECDSA_Signing_SHA256_Hash(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
-    const uint8_t hash[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
-    size_t hash_length   = sizeof(hash);
+    const uint8_t msg[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
+    size_t msg_length   = sizeof(msg);
 
     Test_P256Keypair keypair;
     NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
@@ -1003,10 +771,14 @@ static void TestECDSA_Signing_SHA256_Hash(nlTestSuite * inSuite, void * inContex
     for (int i = 0; i < kNumSigningIterations; ++i)
     {
         P256ECDSASignature signature;
-        CHIP_ERROR signing_error = keypair.ECDSA_sign_hash(hash, hash_length, signature);
+
+        uint8_t hash[Crypto::kSHA256_Hash_Length];
+        NL_TEST_ASSERT(inSuite, Hash_SHA256(&msg[0], msg_length, &hash[0]) == CHIP_NO_ERROR);
+
+        CHIP_ERROR signing_error = keypair.ECDSA_sign_msg(msg, msg_length, signature);
         NL_TEST_ASSERT(inSuite, signing_error == CHIP_NO_ERROR);
 
-        CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, hash_length, signature);
+        CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, sizeof(hash), signature);
         NL_TEST_ASSERT(inSuite, validation_error == CHIP_NO_ERROR);
 
         if ((signing_error != CHIP_NO_ERROR) || (validation_error != CHIP_NO_ERROR))
@@ -1037,28 +809,6 @@ static void TestECDSA_ValidationFailsDifferentMessage(nlTestSuite * inSuite, voi
     NL_TEST_ASSERT(inSuite, validation_error == CHIP_ERROR_INVALID_SIGNATURE);
 }
 
-static void TestECDSA_ValidationFailsDifferentHash(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    const uint8_t hash[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
-    size_t hash_length   = sizeof(hash);
-
-    P256Keypair keypair;
-    NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
-
-    P256ECDSASignature signature;
-    CHIP_ERROR signing_error = keypair.ECDSA_sign_hash(hash, hash_length, signature);
-    NL_TEST_ASSERT(inSuite, signing_error == CHIP_NO_ERROR);
-
-    const uint8_t diff_hash[] = { 0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x10,
-                                  0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x02, 0x00 };
-    size_t diff_hash_length   = sizeof(diff_hash);
-
-    CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(diff_hash, diff_hash_length, signature);
-    NL_TEST_ASSERT(inSuite, validation_error == CHIP_ERROR_INVALID_SIGNATURE);
-}
-
 static void TestECDSA_ValidationFailIncorrectMsgSignature(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
@@ -1081,19 +831,22 @@ static void TestECDSA_ValidationFailIncorrectMsgSignature(nlTestSuite * inSuite,
 static void TestECDSA_ValidationFailIncorrectHashSignature(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
-    const uint8_t hash[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
-    size_t hash_length   = sizeof(hash);
+    const uint8_t msg[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
+    size_t msg_length   = sizeof(msg);
+
+    uint8_t hash[Crypto::kSHA256_Hash_Length];
+    NL_TEST_ASSERT(inSuite, Hash_SHA256(&msg[0], msg_length, &hash[0]) == CHIP_NO_ERROR);
 
     P256Keypair keypair;
     NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
 
     P256ECDSASignature signature;
-    CHIP_ERROR signing_error = keypair.ECDSA_sign_hash(hash, hash_length, signature);
+    CHIP_ERROR signing_error = keypair.ECDSA_sign_msg(msg, msg_length, signature);
     NL_TEST_ASSERT(inSuite, signing_error == CHIP_NO_ERROR);
     signature[0] = static_cast<uint8_t>(~signature[0]); // Flipping bits should invalidate the signature.
 
-    CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, hash_length, signature);
+    CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, sizeof(hash), signature);
     NL_TEST_ASSERT(inSuite, validation_error == CHIP_ERROR_INVALID_SIGNATURE);
 }
 
@@ -1112,26 +865,6 @@ static void TestECDSA_SigningMsgInvalidParams(nlTestSuite * inSuite, void * inCo
     signing_error = CHIP_NO_ERROR;
 
     signing_error = keypair.ECDSA_sign_msg(msg, 0, signature);
-    NL_TEST_ASSERT(inSuite, signing_error == CHIP_ERROR_INVALID_ARGUMENT);
-    signing_error = CHIP_NO_ERROR;
-}
-
-static void TestECDSA_SigningHashInvalidParams(nlTestSuite * inSuite, void * inContext)
-{
-    HeapChecker heapChecker(inSuite);
-    const uint8_t hash[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
-    size_t hash_length   = sizeof(hash);
-
-    P256Keypair keypair;
-    NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
-
-    P256ECDSASignature signature;
-    CHIP_ERROR signing_error = keypair.ECDSA_sign_hash(nullptr, hash_length, signature);
-    NL_TEST_ASSERT(inSuite, signing_error == CHIP_ERROR_INVALID_ARGUMENT);
-    signing_error = CHIP_NO_ERROR;
-
-    signing_error = keypair.ECDSA_sign_hash(hash, hash_length - 5, signature);
     NL_TEST_ASSERT(inSuite, signing_error == CHIP_ERROR_INVALID_ARGUMENT);
     signing_error = CHIP_NO_ERROR;
 }
@@ -1161,22 +894,25 @@ static void TestECDSA_ValidationMsgInvalidParam(nlTestSuite * inSuite, void * in
 static void TestECDSA_ValidationHashInvalidParam(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
-    const uint8_t hash[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
-    size_t hash_length   = sizeof(hash);
+    const uint8_t msg[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
+    size_t msg_length   = sizeof(msg);
+
+    uint8_t hash[Crypto::kSHA256_Hash_Length];
+    NL_TEST_ASSERT(inSuite, Hash_SHA256(&msg[0], msg_length, &hash[0]) == CHIP_NO_ERROR);
 
     P256Keypair keypair;
     NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
 
     P256ECDSASignature signature;
-    CHIP_ERROR signing_error = keypair.ECDSA_sign_hash(hash, hash_length, signature);
+    CHIP_ERROR signing_error = keypair.ECDSA_sign_msg(msg, msg_length, signature);
     NL_TEST_ASSERT(inSuite, signing_error == CHIP_NO_ERROR);
 
-    CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(nullptr, hash_length, signature);
+    CHIP_ERROR validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(nullptr, sizeof(hash), signature);
     NL_TEST_ASSERT(inSuite, validation_error == CHIP_ERROR_INVALID_ARGUMENT);
     signing_error = CHIP_NO_ERROR;
 
-    validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, hash_length - 5, signature);
+    validation_error = keypair.Pubkey().ECDSA_validate_hash_signature(hash, sizeof(hash) - 5, signature);
     NL_TEST_ASSERT(inSuite, validation_error == CHIP_ERROR_INVALID_ARGUMENT);
     signing_error = CHIP_NO_ERROR;
 }
@@ -1246,6 +982,14 @@ static void TestAddEntropySources(nlTestSuite * inSuite, void * inContext)
 }
 #endif
 
+#if CHIP_CRYPTO_BORINGSSL
+static void TestAddEntropySources(nlTestSuite * inSuite, void * inContext) {}
+#endif
+
+#if CHIP_CRYPTO_PLATFORM
+static void TestAddEntropySources(nlTestSuite * inSuite, void * inContext) {}
+#endif
+
 static void TestPBKDF2_SHA256_TestVectors(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
@@ -1290,7 +1034,215 @@ static void TestP256_Keygen(nlTestSuite * inSuite, void * inContext)
     NL_TEST_ASSERT(inSuite, keypair.Pubkey().ECDSA_validate_msg_signature(test_msg, msglen, test_sig) == CHIP_NO_ERROR);
 }
 
-static void TestCSR_Gen(nlTestSuite * inSuite, void * inContext)
+void TestCSR_Verify(nlTestSuite * inSuite, void * inContext)
+{
+    Crypto::P256PublicKey pubKey;
+    CHIP_ERROR err;
+
+    // First case: there is trailing garbage in the CSR
+    {
+        const uint8_t kBadTrailingGarbageCsr[255] = {
+            0x30, 0x81, 0xda, 0x30, 0x81, 0x81, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x0b,
+            0x0c, 0x03, 0x43, 0x53, 0x41, 0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+            0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0x72, 0x48, 0xc0, 0x36, 0xf0, 0x12, 0x5f, 0xd1,
+            0x68, 0x92, 0x2d, 0xee, 0x57, 0x2b, 0x8e, 0x20, 0x9d, 0x97, 0xfa, 0x73, 0x92, 0xf1, 0xa0, 0x91, 0x0e, 0xfd, 0x04, 0x93,
+            0x66, 0x47, 0x3c, 0xa3, 0xf0, 0xa8, 0x47, 0xa1, 0xa3, 0x1e, 0x13, 0x3b, 0x67, 0x3b, 0x18, 0xca, 0x77, 0xd1, 0xea, 0xe3,
+            0x74, 0x93, 0x49, 0x8b, 0x9d, 0xdc, 0xef, 0xf9, 0xd5, 0x9b, 0x27, 0x19, 0xad, 0x6e, 0x90, 0xd2, 0xa0, 0x11, 0x30, 0x0f,
+            0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x0e, 0x31, 0x02, 0x30, 0x00, 0x30, 0x0a, 0x06, 0x08, 0x2a,
+            0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x03, 0x48, 0x00, 0x30, 0x45, 0x02, 0x20, 0x6a, 0x2e, 0x15, 0x34, 0x1b, 0xde,
+            0xcb, 0x8f, 0xd2, 0xfd, 0x35, 0x03, 0x89, 0x0e, 0xed, 0x23, 0x54, 0xff, 0xcb, 0x79, 0xf9, 0xcb, 0x40, 0x33, 0x59, 0xb4,
+            0x27, 0x69, 0xeb, 0x07, 0x3b, 0xd5, 0x02, 0x21, 0x00, 0xb0, 0x25, 0xc9, 0xc2, 0x21, 0xe8, 0x54, 0xcc, 0x08, 0x12, 0xf5,
+            0x10, 0x3a, 0x0b, 0x25, 0x20, 0x0a, 0x61, 0x38, 0xc8, 0x6f, 0x82, 0xa7, 0x51, 0x84, 0x61, 0xae, 0x93, 0x69, 0xe4, 0x74,
+            0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+
+        err = VerifyCertificateSigningRequest(&kBadTrailingGarbageCsr[0], sizeof(kBadTrailingGarbageCsr), pubKey);
+
+        // On first test case, check if CSRs are supported at all, and skip test if they are not.
+        if (err == CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE)
+        {
+            ChipLogError(Crypto, "The current platform does not support CSR parsing.");
+            return;
+        }
+
+        NL_TEST_ASSERT(inSuite, err != CHIP_NO_ERROR);
+
+        err = VerifyCertificateSigningRequestFormat(&kBadTrailingGarbageCsr[0], sizeof(kBadTrailingGarbageCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_UNSUPPORTED_CERT_FORMAT);
+    }
+
+    // Second case: correct CSR
+    {
+        const uint8_t kGoodCsr[205] = {
+            0x30, 0x81, 0xca, 0x30, 0x70, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x0a,
+            0x0c, 0x03, 0x43, 0x53, 0x52, 0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
+            0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0xa3, 0xbe, 0xa1, 0xf5, 0x42, 0x01,
+            0x07, 0x3c, 0x4b, 0x75, 0x85, 0xd8, 0xe2, 0x98, 0xac, 0x2f, 0xf6, 0x98, 0xdb, 0xd9, 0x5b, 0xe0, 0x7e, 0xc1, 0x04,
+            0xd5, 0x73, 0xc5, 0xb0, 0x90, 0x77, 0x27, 0x00, 0x1e, 0x22, 0xc7, 0x89, 0x5e, 0x4d, 0x75, 0x07, 0x89, 0x82, 0x0f,
+            0x49, 0xb6, 0x59, 0xd5, 0xc5, 0x15, 0x7d, 0x93, 0xe6, 0x80, 0x5c, 0x70, 0x89, 0x0a, 0x43, 0x10, 0x3d, 0xeb, 0x3d,
+            0x4a, 0xa0, 0x00, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x05, 0x00, 0x03, 0x48,
+            0x00, 0x30, 0x45, 0x02, 0x20, 0x1d, 0x86, 0x21, 0xb4, 0xc2, 0xe1, 0xa9, 0xf3, 0xbc, 0xc8, 0x7c, 0xda, 0xb4, 0xb9,
+            0xc6, 0x8c, 0xd0, 0xe4, 0x9a, 0x9c, 0xef, 0x02, 0x93, 0x98, 0x27, 0x7e, 0x81, 0x21, 0x5d, 0x20, 0x9d, 0x32, 0x02,
+            0x21, 0x00, 0x8b, 0x6b, 0x49, 0xb6, 0x7d, 0x3e, 0x67, 0x9e, 0xb1, 0x22, 0xd3, 0x63, 0x82, 0x40, 0x4f, 0x49, 0xa4,
+            0xdc, 0x17, 0x35, 0xac, 0x4b, 0x7a, 0xbf, 0x52, 0x05, 0x58, 0x68, 0xe0, 0xaa, 0xd2, 0x8e,
+        };
+        const uint8_t kGoodCsrSubjectPublicKey[65] = {
+            0x04, 0xa3, 0xbe, 0xa1, 0xf5, 0x42, 0x01, 0x07, 0x3c, 0x4b, 0x75, 0x85, 0xd8, 0xe2, 0x98, 0xac, 0x2f,
+            0xf6, 0x98, 0xdb, 0xd9, 0x5b, 0xe0, 0x7e, 0xc1, 0x04, 0xd5, 0x73, 0xc5, 0xb0, 0x90, 0x77, 0x27, 0x00,
+            0x1e, 0x22, 0xc7, 0x89, 0x5e, 0x4d, 0x75, 0x07, 0x89, 0x82, 0x0f, 0x49, 0xb6, 0x59, 0xd5, 0xc5, 0x15,
+            0x7d, 0x93, 0xe6, 0x80, 0x5c, 0x70, 0x89, 0x0a, 0x43, 0x10, 0x3d, 0xeb, 0x3d, 0x4a,
+        };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+
+        err = VerifyCertificateSigningRequestFormat(&kGoodCsr[0], sizeof(kGoodCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+
+        err = VerifyCertificateSigningRequest(&kGoodCsr[0], sizeof(kGoodCsr), pubKey);
+        NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+
+        Crypto::P256PublicKey expected(kGoodCsrSubjectPublicKey);
+        NL_TEST_ASSERT(inSuite, pubKey.Matches(expected));
+    }
+
+    // Third case: bad signature
+    {
+        const uint8_t kBadSignatureSignatureCsr[205] = {
+            0x30, 0x81, 0xca, 0x30, 0x70, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x0a,
+            0x0c, 0x03, 0x43, 0x53, 0x52, 0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
+            0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0xa3, 0xbe, 0xa1, 0xf5, 0x42, 0x01,
+            0x07, 0x3c, 0x4b, 0x75, 0x85, 0xd8, 0xe2, 0x98, 0xac, 0x2f, 0xf6, 0x98, 0xdb, 0xd9, 0x5b, 0xe0, 0x7e, 0xc1, 0x04,
+            0xd5, 0x73, 0xc5, 0xb0, 0x90, 0x77, 0x27, 0x00, 0x1e, 0x22, 0xc7, 0x89, 0x5e, 0x4d, 0x75, 0x07, 0x89, 0x82, 0x0f,
+            0x49, 0xb6, 0x59, 0xd5, 0xc5, 0x15, 0x7d, 0x93, 0xe6, 0x80, 0x5c, 0x70, 0x89, 0x0a, 0x43, 0x10, 0x3d, 0xeb, 0x3d,
+            0x4a, 0xa0, 0x00, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x05, 0x00, 0x03, 0x48,
+            0x00, 0x30, 0x45, 0x02, 0x20, 0x1d, 0x86, 0x21, 0xb4, 0xc2, 0xe1, 0xa9, 0xf3, 0xbc, 0xc8, 0x7c, 0xda, 0xb4, 0xb9,
+            0xc6, 0x8c, 0xd0, 0xe4, 0x9a, 0x9c, 0xef, 0x02, 0x93, 0x98, 0x27, 0x7e, 0x81, 0x21, 0x5d, 0x20, 0x9d, 0x32, 0x02,
+            0x21, 0x00, 0x8b, 0x6b, 0x49, 0xb6, 0x7d, 0x3e, 0x67, 0x9e, 0xb1, 0x21, 0xd3, 0x63, 0x82, 0x40, 0x4f, 0x49, 0xa4,
+            0xdc, 0x17, 0x35, 0xac, 0x4b, 0x7a, 0xbf, 0x52, 0x05, 0x58, 0x68, 0xe0, 0xaa, 0xd2, 0x8e,
+        };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+
+        err = VerifyCertificateSigningRequestFormat(&kBadSignatureSignatureCsr[0], sizeof(kBadSignatureSignatureCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+
+        err = VerifyCertificateSigningRequest(&kBadSignatureSignatureCsr[0], sizeof(kBadSignatureSignatureCsr), pubKey);
+        NL_TEST_ASSERT(inSuite, err != CHIP_NO_ERROR);
+    }
+
+    // Fourth case: CSR too big
+    {
+        const uint8_t kBadTooBigCsr[256] = {
+            0x30, 0x81, 0xda, 0x30, 0x81, 0x81, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x0b,
+            0x0c, 0x03, 0x43, 0x53, 0x41, 0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+            0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0x72, 0x48, 0xc0, 0x36, 0xf0, 0x12, 0x5f, 0xd1,
+            0x68, 0x92, 0x2d, 0xee, 0x57, 0x2b, 0x8e, 0x20, 0x9d, 0x97, 0xfa, 0x73, 0x92, 0xf1, 0xa0, 0x91, 0x0e, 0xfd, 0x04, 0x93,
+            0x66, 0x47, 0x3c, 0xa3, 0xf0, 0xa8, 0x47, 0xa1, 0xa3, 0x1e, 0x13, 0x3b, 0x67, 0x3b, 0x18, 0xca, 0x77, 0xd1, 0xea, 0xe3,
+            0x74, 0x93, 0x49, 0x8b, 0x9d, 0xdc, 0xef, 0xf9, 0xd5, 0x9b, 0x27, 0x19, 0xad, 0x6e, 0x90, 0xd2, 0xa0, 0x11, 0x30, 0x0f,
+            0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x0e, 0x31, 0x02, 0x30, 0x00, 0x30, 0x0a, 0x06, 0x08, 0x2a,
+            0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x03, 0x48, 0x00, 0x30, 0x45, 0x02, 0x20, 0x6a, 0x2e, 0x15, 0x34, 0x1b, 0xde,
+            0xcb, 0x8f, 0xd2, 0xfd, 0x35, 0x03, 0x89, 0x0e, 0xed, 0x23, 0x54, 0xff, 0xcb, 0x79, 0xf9, 0xcb, 0x40, 0x33, 0x59, 0xb4,
+            0x27, 0x69, 0xeb, 0x07, 0x3b, 0xd5, 0x02, 0x21, 0x00, 0xb0, 0x25, 0xc9, 0xc2, 0x21, 0xe8, 0x54, 0xcc, 0x08, 0x12, 0xf5,
+            0x10, 0x3a, 0x0b, 0x25, 0x20, 0x0a, 0x61, 0x38, 0xc8, 0x6f, 0x82, 0xa7, 0x51, 0x84, 0x61, 0xae, 0x93, 0x69, 0xe4, 0x74,
+            0x84, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+        err = VerifyCertificateSigningRequestFormat(&kBadTooBigCsr[0], sizeof(kBadTooBigCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_UNSUPPORTED_CERT_FORMAT);
+
+        err = VerifyCertificateSigningRequest(&kBadTooBigCsr[0], sizeof(kBadTooBigCsr), pubKey);
+        NL_TEST_ASSERT(inSuite, err != CHIP_NO_ERROR);
+    }
+
+    // Fifth case: obviously invalid CSR (1/2)
+    {
+        const uint8_t kTooSmallCsr[10] = { 0x30, 0x81, 0xda, 0x30, 0x81, 0x81, 0x02, 0x01, 0x00, 0x30 };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+
+        err = VerifyCertificateSigningRequestFormat(&kTooSmallCsr[0], sizeof(kTooSmallCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_UNSUPPORTED_CERT_FORMAT);
+
+        err = VerifyCertificateSigningRequest(&kTooSmallCsr[0], sizeof(kTooSmallCsr), pubKey);
+        NL_TEST_ASSERT(inSuite, err != CHIP_NO_ERROR);
+    }
+
+    // Sixth case: obviously invalid CSR (2/2)
+    {
+        const uint8_t kNotSequenceCsr[205] = {
+            0x31, 0x81, 0xca, 0x30, 0x70, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x0a,
+            0x0c, 0x03, 0x43, 0x53, 0x52, 0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
+            0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04, 0xa3, 0xbe, 0xa1, 0xf5, 0x42, 0x01,
+            0x07, 0x3c, 0x4b, 0x75, 0x85, 0xd8, 0xe2, 0x98, 0xac, 0x2f, 0xf6, 0x98, 0xdb, 0xd9, 0x5b, 0xe0, 0x7e, 0xc1, 0x04,
+            0xd5, 0x73, 0xc5, 0xb0, 0x90, 0x77, 0x27, 0x00, 0x1e, 0x22, 0xc7, 0x89, 0x5e, 0x4d, 0x75, 0x07, 0x89, 0x82, 0x0f,
+            0x49, 0xb6, 0x59, 0xd5, 0xc5, 0x15, 0x7d, 0x93, 0xe6, 0x80, 0x5c, 0x70, 0x89, 0x0a, 0x43, 0x10, 0x3d, 0xeb, 0x3d,
+            0x4a, 0xa0, 0x00, 0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x05, 0x00, 0x03, 0x48,
+            0x00, 0x30, 0x45, 0x02, 0x20, 0x1d, 0x86, 0x21, 0xb4, 0xc2, 0xe1, 0xa9, 0xf3, 0xbc, 0xc8, 0x7c, 0xda, 0xb4, 0xb9,
+            0xc6, 0x8c, 0xd0, 0xe4, 0x9a, 0x9c, 0xef, 0x02, 0x93, 0x98, 0x27, 0x7e, 0x81, 0x21, 0x5d, 0x20, 0x9d, 0x32, 0x02,
+            0x21, 0x00, 0x8b, 0x6b, 0x49, 0xb6, 0x7d, 0x3e, 0x67, 0x9e, 0xb1, 0x22, 0xd3, 0x63, 0x82, 0x40, 0x4f, 0x49, 0xa4,
+            0xdc, 0x17, 0x35, 0xac, 0x4b, 0x7a, 0xbf, 0x52, 0x05, 0x58, 0x68, 0xe0, 0xaa, 0xd2, 0x8e,
+        };
+
+        Crypto::ClearSecretData(pubKey.Bytes(), pubKey.Length());
+
+        err = VerifyCertificateSigningRequestFormat(&kNotSequenceCsr[0], sizeof(kNotSequenceCsr));
+        NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_UNSUPPORTED_CERT_FORMAT);
+
+        err = VerifyCertificateSigningRequest(&kNotSequenceCsr[0], sizeof(kNotSequenceCsr), pubKey);
+        NL_TEST_ASSERT(inSuite, err != CHIP_NO_ERROR);
+    }
+}
+
+void TestCSR_GenDirect(nlTestSuite * inSuite, void * inContext)
+{
+    uint8_t csrBuf[kMAX_CSR_Length];
+    ClearSecretData(csrBuf);
+    MutableByteSpan csrSpan(csrBuf);
+
+    Test_P256Keypair keypair;
+
+    NL_TEST_ASSERT(inSuite, keypair.Initialize() == CHIP_NO_ERROR);
+
+    // Validate case of buffer too small
+    uint8_t csrBufTooSmall[kMAX_CSR_Length - 1];
+    MutableByteSpan csrSpanTooSmall(csrBufTooSmall);
+    NL_TEST_ASSERT(inSuite, GenerateCertificateSigningRequest(&keypair, csrSpanTooSmall) == CHIP_ERROR_BUFFER_TOO_SMALL);
+
+    // Validate case of null keypair
+    NL_TEST_ASSERT(inSuite, GenerateCertificateSigningRequest(nullptr, csrSpan) == CHIP_ERROR_INVALID_ARGUMENT);
+
+    // Validate normal case
+    ClearSecretData(csrBuf);
+    NL_TEST_ASSERT(inSuite, GenerateCertificateSigningRequest(&keypair, csrSpan) == CHIP_NO_ERROR);
+
+    P256PublicKey pubkey;
+
+    CHIP_ERROR err = VerifyCertificateSigningRequest(csrSpan.data(), csrSpan.size(), pubkey);
+    if (err != CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE)
+    {
+        NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+        NL_TEST_ASSERT(inSuite, pubkey.Length() == kP256_PublicKey_Length);
+        NL_TEST_ASSERT(inSuite, memcmp(pubkey.ConstBytes(), keypair.Pubkey().ConstBytes(), pubkey.Length()) == 0);
+
+        // Let's corrupt the CSR buffer and make sure it fails to verify
+        size_t length      = csrSpan.size();
+        csrBuf[length - 2] = (uint8_t)(csrBuf[length - 2] + 1);
+        csrBuf[length - 1] = (uint8_t)(csrBuf[length - 1] + 1);
+
+        NL_TEST_ASSERT(inSuite, VerifyCertificateSigningRequest(csrSpan.data(), csrSpan.size(), pubkey) != CHIP_NO_ERROR);
+    }
+    else
+    {
+        ChipLogError(Crypto, "The current platform does not support CSR parsing.");
+    }
+}
+
+static void TestCSR_GenByKeypair(nlTestSuite * inSuite, void * inContext)
 {
     HeapChecker heapChecker(inSuite);
     uint8_t csr[kMAX_CSR_Length];
@@ -1828,28 +1780,6 @@ static void TestCompressedFabricIdentifier(nlTestSuite * inSuite, void * inConte
     NL_TEST_ASSERT(inSuite, error == CHIP_ERROR_INVALID_ARGUMENT);
 }
 
-#if CHIP_CRYPTO_OPENSSL
-static void TestX509_PKCS7Extraction(nlTestSuite * inSuite, void * inContext)
-{
-    CHIP_ERROR err = CHIP_NO_ERROR;
-    int status     = 0;
-    X509DerCertificate x509list[3];
-    uint32_t max_certs = sizeof(x509list) / sizeof(X509DerCertificate);
-
-    err = LoadCertsFromPKCS7(pem_pkcs7_blob, x509list, &max_certs);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    status = memcmp(certificate_blob_leaf, x509list[0], x509list[0].Length());
-    NL_TEST_ASSERT(inSuite, status == 0);
-
-    status = memcmp(certificate_blob_intermediate, x509list[1], x509list[1].Length());
-    NL_TEST_ASSERT(inSuite, status == 0);
-
-    status = memcmp(certificate_blob_root, x509list[2], x509list[2].Length());
-    NL_TEST_ASSERT(inSuite, status == 0);
-}
-#endif // CHIP_CRYPTO_OPENSSL
-
 static void TestPubkey_x509Extraction(nlTestSuite * inSuite, void * inContext)
 {
     using namespace TestCerts;
@@ -1884,49 +1814,57 @@ static void TestX509_CertChainValidation(nlTestSuite * inSuite, void * inContext
     HeapChecker heapChecker(inSuite);
     CHIP_ERROR err = CHIP_NO_ERROR;
 
-    ByteSpan root_cert;
-    err = GetTestCert(TestCert::kRoot01, TestCertLoadFlags::kDERForm, root_cert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+    struct ValidationTestCase
+    {
+        ByteSpan root;
+        ByteSpan ica;
+        ByteSpan leaf;
+        CHIP_ERROR expectedError;
+        CertificateChainValidationResult expectedValResult;
+    };
 
-    ByteSpan ica_cert;
-    err = GetTestCert(TestCert::kICA01, TestCertLoadFlags::kDERForm, ica_cert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+    // clang-format off
+    static ValidationTestCase sValidationTestCases[] = {
+        // root                                 ica                                        leaf                                             Expected Error              Expected Validation Result
+        // ======================================================================================================================================================================================================================
+        {  sTestCert_PAA_FFF1_Cert,             sTestCert_PAI_FFF1_8000_Cert,              sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_FFF1_Cert,             sTestCert_PAI_FFF1_8000_Cert,              sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_NoPID_Cert,             sTestCert_DAC_FFF2_8002_0017_Cert,               CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_NoPID_FB_Cert,          sTestCert_DAC_FFF2_8003_0018_FB_Cert,            CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8004_FB_Cert,           sTestCert_DAC_FFF2_8004_001C_FB_Cert,            CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        // Valid cases with PAA, PAI, DAC time validity in the past or future:
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8004_FB_Cert,           sTestCert_DAC_FFF2_8004_0020_ValInPast_Cert,     CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8004_FB_Cert,           sTestCert_DAC_FFF2_8004_0021_ValInFuture_Cert,   CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8005_ValInPast_Cert,    sTestCert_DAC_FFF2_8005_0022_ValInPast_Cert,     CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8005_ValInFuture_Cert,  sTestCert_DAC_FFF2_8005_0023_ValInFuture_Cert,   CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_FFF2_ValInPast_Cert,   sTestCert_PAI_FFF2_8006_ValInPast_Cert,    sTestCert_DAC_FFF2_8006_0024_ValInPast_Cert,     CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        {  sTestCert_PAA_FFF2_ValInFuture_Cert, sTestCert_PAI_FFF2_8006_ValInFuture_Cert,  sTestCert_DAC_FFF2_8006_0025_ValInFuture_Cert,   CHIP_NO_ERROR,               CertificateChainValidationResult::kSuccess             },
+        // Error cases with invalid (empty Span) inputs:
+        {  ByteSpan(),                          sTestCert_PAI_FFF1_8000_Cert,              sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_ERROR_INVALID_ARGUMENT, CertificateChainValidationResult::kRootArgumentInvalid },
+        {  sTestCert_PAA_FFF1_Cert,             ByteSpan(),                                sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_ERROR_INVALID_ARGUMENT, CertificateChainValidationResult::kICAArgumentInvalid  },
+        {  sTestCert_PAA_FFF1_Cert,             sTestCert_PAI_FFF1_8000_Cert,              ByteSpan(),                                      CHIP_ERROR_INVALID_ARGUMENT, CertificateChainValidationResult::kLeafArgumentInvalid },
+        // Error cases with wrong certificate chaining:
+        {  sTestCert_PAA_FFF1_Cert,             sTestCert_PAI_FFF2_NoPID_Cert,             sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF1_8000_Cert,              sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAA_FFF1_Cert,                   sTestCert_DAC_FFF1_8000_0000_Cert,               CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        // Error cases with PAA, PAI, DAC time validity in the past or future.
+        // In all cases either PAA or PAI was invalid with respect to DAC's notBefore time:
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8004_FB_Cert,           sTestCert_DAC_FFF2_8004_0030_Val1SecBefore_Cert, CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8005_Val1SecBefore_Cert,sTestCert_DAC_FFF2_8005_0032_Val1SecBefore_Cert, CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_NoVID_Cert,            sTestCert_PAI_FFF2_8005_ValInFuture_Cert,  sTestCert_DAC_FFF2_8005_0033_Val1SecBefore_Cert, CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_FFF2_ValInPast_Cert,   sTestCert_PAI_FFF2_8006_ValInPast_Cert,    sTestCert_DAC_FFF2_8006_0034_ValInFuture_Cert,   CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+        {  sTestCert_PAA_FFF2_ValInFuture_Cert, sTestCert_PAI_FFF2_8006_ValInFuture_Cert,  sTestCert_DAC_FFF2_8006_0035_Val1SecBefore_Cert, CHIP_ERROR_CERT_NOT_TRUSTED, CertificateChainValidationResult::kChainInvalid        },
+    };
+    // clang-format on
 
-    ByteSpan leaf_cert;
-    err = GetTestCert(TestCert::kNode01_01, TestCertLoadFlags::kDERForm, leaf_cert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    CertificateChainValidationResult chainValidationResult;
-    err = ValidateCertificateChain(root_cert.data(), root_cert.size(), ica_cert.data(), ica_cert.size(), leaf_cert.data(),
-                                   leaf_cert.size(), chainValidationResult);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-    NL_TEST_ASSERT(inSuite, chainValidationResult == CertificateChainValidationResult::kSuccess);
-
-    // Now test for invalid arguments.
-    err = ValidateCertificateChain(nullptr, 0, ica_cert.data(), ica_cert.size(), leaf_cert.data(), leaf_cert.size(),
-                                   chainValidationResult);
-    NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-    NL_TEST_ASSERT(inSuite, chainValidationResult == CertificateChainValidationResult::kRootArgumentInvalid);
-
-    err = ValidateCertificateChain(root_cert.data(), root_cert.size(), nullptr, 0, leaf_cert.data(), leaf_cert.size(),
-                                   chainValidationResult);
-    NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-    NL_TEST_ASSERT(inSuite, chainValidationResult == CertificateChainValidationResult::kICAArgumentInvalid);
-
-    err = ValidateCertificateChain(root_cert.data(), root_cert.size(), ica_cert.data(), ica_cert.size(), nullptr, 0,
-                                   chainValidationResult);
-    NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_INVALID_ARGUMENT);
-    NL_TEST_ASSERT(inSuite, chainValidationResult == CertificateChainValidationResult::kLeafArgumentInvalid);
-
-    // Now test with an ICA certificate that does not correspond to the chain
-    ByteSpan wrong_ica_cert;
-    err = GetTestCert(TestCert::kICA02, TestCertLoadFlags::kDERForm, wrong_ica_cert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    err = ValidateCertificateChain(root_cert.data(), root_cert.size(), wrong_ica_cert.data(), wrong_ica_cert.size(),
-                                   leaf_cert.data(), leaf_cert.size(), chainValidationResult);
-    NL_TEST_ASSERT(inSuite, err == CHIP_ERROR_CERT_NOT_TRUSTED);
-    NL_TEST_ASSERT(inSuite, chainValidationResult == CertificateChainValidationResult::kChainInvalid);
+    for (auto & testCase : sValidationTestCases)
+    {
+        CertificateChainValidationResult chainValidationResult;
+        err = ValidateCertificateChain(testCase.root.data(), testCase.root.size(), testCase.ica.data(), testCase.ica.size(),
+                                       testCase.leaf.data(), testCase.leaf.size(), chainValidationResult);
+        NL_TEST_ASSERT(inSuite, err == testCase.expectedError);
+        NL_TEST_ASSERT(inSuite, chainValidationResult == testCase.expectedValResult);
+    }
 }
 
 static void TestX509_IssuingTimestampValidation(nlTestSuite * inSuite, void * inContext)
@@ -1937,80 +1875,45 @@ static void TestX509_IssuingTimestampValidation(nlTestSuite * inSuite, void * in
     HeapChecker heapChecker(inSuite);
     CHIP_ERROR err = CHIP_NO_ERROR;
 
-    /*
-    credentials/test/attestation/Chip-Test-DAC-FFF1-8000-000A-Cert.pem
-    -----BEGIN CERTIFICATE-----
-    MIIB6jCCAY+gAwIBAgIIBRpp5eeAND4wCgYIKoZIzj0EAwIwRjEYMBYGA1UEAwwP
-    TWF0dGVyIFRlc3QgUEFJMRQwEgYKKwYBBAGConwCAQwERkZGMTEUMBIGCisGAQQB
-    gqJ8AgIMBDgwMDAwIBcNMjEwNjI4MTQyMzQzWhgPOTk5OTEyMzEyMzU5NTlaMEsx
-    HTAbBgNVBAMMFE1hdHRlciBUZXN0IERBQyAwMDBBMRQwEgYKKwYBBAGConwCAQwE
-    RkZGMTEUMBIGCisGAQQBgqJ8AgIMBDgwMDAwWTATBgcqhkjOPQIBBggqhkjOPQMB
-    BwNCAAR6hFivu5vNFeGa3NJm9mycL2B8dHR6NfgPN+EYEz+A8XYBEyePkfFaoPf4
-    eTIJT+aftyhoqB4ml5s2izO1VDEDo2AwXjAMBgNVHRMBAf8EAjAAMA4GA1UdDwEB
-    /wQEAwIHgDAdBgNVHQ4EFgQU1a2yuIOOyAc8R3LcfoeX/rsjs64wHwYDVR0jBBgw
-    FoAUhPUd/57M2ik1lEhSDoXxKS2j7dcwCgYIKoZIzj0EAwIDSQAwRgIhAPL+Fnlk
-    P0xbynYuijQV7VEwBvzQUtpQbWLYvVFeN70IAiEAvi20eqszdReOEkmgeSCgrG6q
-    OS8H8W2E/ctS268o19k=
-    -----END CERTIFICATE-----
-    */
-    /*
-    Validity
-        Not Before: Jun 28 14:23:43 2021 GMT
-        Not After : Dec 31 23:59:59 9999 GMT
-    */
-    constexpr uint8_t kDacCertificate[] = {
-        0x30, 0x82, 0x01, 0xEA, 0x30, 0x82, 0x01, 0x8F, 0xA0, 0x03, 0x02, 0x01, 0x02, 0x02, 0x08, 0x05, 0x1A, 0x69, 0xE5, 0xE7,
-        0x80, 0x34, 0x3E, 0x30, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02, 0x30, 0x46, 0x31, 0x18, 0x30,
-        0x16, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0C, 0x0F, 0x4D, 0x61, 0x74, 0x74, 0x65, 0x72, 0x20, 0x54, 0x65, 0x73, 0x74, 0x20,
-        0x50, 0x41, 0x49, 0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0xA2, 0x7C, 0x02, 0x01, 0x0C,
-        0x04, 0x46, 0x46, 0x46, 0x31, 0x31, 0x14, 0x30, 0x12, 0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0xA2, 0x7C, 0x02,
-        0x02, 0x0C, 0x04, 0x38, 0x30, 0x30, 0x30, 0x30, 0x20, 0x17, 0x0D, 0x32, 0x31, 0x30, 0x36, 0x32, 0x38, 0x31, 0x34, 0x32,
-        0x33, 0x34, 0x33, 0x5A, 0x18, 0x0F, 0x39, 0x39, 0x39, 0x39, 0x31, 0x32, 0x33, 0x31, 0x32, 0x33, 0x35, 0x39, 0x35, 0x39,
-        0x5A, 0x30, 0x4B, 0x31, 0x1D, 0x30, 0x1B, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0C, 0x14, 0x4D, 0x61, 0x74, 0x74, 0x65, 0x72,
-        0x20, 0x54, 0x65, 0x73, 0x74, 0x20, 0x44, 0x41, 0x43, 0x20, 0x30, 0x30, 0x30, 0x41, 0x31, 0x14, 0x30, 0x12, 0x06, 0x0A,
-        0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0xA2, 0x7C, 0x02, 0x01, 0x0C, 0x04, 0x46, 0x46, 0x46, 0x31, 0x31, 0x14, 0x30, 0x12,
-        0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0xA2, 0x7C, 0x02, 0x02, 0x0C, 0x04, 0x38, 0x30, 0x30, 0x30, 0x30, 0x59,
-        0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01,
-        0x07, 0x03, 0x42, 0x00, 0x04, 0x7A, 0x84, 0x58, 0xAF, 0xBB, 0x9B, 0xCD, 0x15, 0xE1, 0x9A, 0xDC, 0xD2, 0x66, 0xF6, 0x6C,
-        0x9C, 0x2F, 0x60, 0x7C, 0x74, 0x74, 0x7A, 0x35, 0xF8, 0x0F, 0x37, 0xE1, 0x18, 0x13, 0x3F, 0x80, 0xF1, 0x76, 0x01, 0x13,
-        0x27, 0x8F, 0x91, 0xF1, 0x5A, 0xA0, 0xF7, 0xF8, 0x79, 0x32, 0x09, 0x4F, 0xE6, 0x9F, 0xB7, 0x28, 0x68, 0xA8, 0x1E, 0x26,
-        0x97, 0x9B, 0x36, 0x8B, 0x33, 0xB5, 0x54, 0x31, 0x03, 0xA3, 0x60, 0x30, 0x5E, 0x30, 0x0C, 0x06, 0x03, 0x55, 0x1D, 0x13,
-        0x01, 0x01, 0xFF, 0x04, 0x02, 0x30, 0x00, 0x30, 0x0E, 0x06, 0x03, 0x55, 0x1D, 0x0F, 0x01, 0x01, 0xFF, 0x04, 0x04, 0x03,
-        0x02, 0x07, 0x80, 0x30, 0x1D, 0x06, 0x03, 0x55, 0x1D, 0x0E, 0x04, 0x16, 0x04, 0x14, 0xD5, 0xAD, 0xB2, 0xB8, 0x83, 0x8E,
-        0xC8, 0x07, 0x3C, 0x47, 0x72, 0xDC, 0x7E, 0x87, 0x97, 0xFE, 0xBB, 0x23, 0xB3, 0xAE, 0x30, 0x1F, 0x06, 0x03, 0x55, 0x1D,
-        0x23, 0x04, 0x18, 0x30, 0x16, 0x80, 0x14, 0x84, 0xF5, 0x1D, 0xFF, 0x9E, 0xCC, 0xDA, 0x29, 0x35, 0x94, 0x48, 0x52, 0x0E,
-        0x85, 0xF1, 0x29, 0x2D, 0xA3, 0xED, 0xD7, 0x30, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02, 0x03,
-        0x49, 0x00, 0x30, 0x46, 0x02, 0x21, 0x00, 0xF2, 0xFE, 0x16, 0x79, 0x64, 0x3F, 0x4C, 0x5B, 0xCA, 0x76, 0x2E, 0x8A, 0x34,
-        0x15, 0xED, 0x51, 0x30, 0x06, 0xFC, 0xD0, 0x52, 0xDA, 0x50, 0x6D, 0x62, 0xD8, 0xBD, 0x51, 0x5E, 0x37, 0xBD, 0x08, 0x02,
-        0x21, 0x00, 0xBE, 0x2D, 0xB4, 0x7A, 0xAB, 0x33, 0x75, 0x17, 0x8E, 0x12, 0x49, 0xA0, 0x79, 0x20, 0xA0, 0xAC, 0x6E, 0xAA,
-        0x39, 0x2F, 0x07, 0xF1, 0x6D, 0x84, 0xFD, 0xCB, 0x52, 0xDB, 0xAF, 0x28, 0xD7, 0xD9
+    struct ValidationTestCase
+    {
+        ByteSpan refCert;
+        ByteSpan evaluatedCert;
+        CHIP_ERROR expectedError;
     };
-    ByteSpan kDacCert(kDacCertificate);
 
-    ByteSpan rootCert;
-    err = GetTestCert(TestCert::kRoot01, TestCertLoadFlags::kDERForm, rootCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+    // clang-format off
+    static ValidationTestCase sValidationTestCases[] = {
+        // Reference Certificate                            Evaluated Certificate                          Expected Error
+        // ================================================================================================================================
+        {  sTestCert_DAC_FFF1_8000_0000_Cert,               sTestCert_PAA_FFF1_Cert,                       CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF1_8000_0000_Cert,               sTestCert_PAI_FFF1_8000_Cert,                  CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF2_8004_0020_ValInPast_Cert,     sTestCert_PAA_NoVID_Cert,                      CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF2_8004_0021_ValInFuture_Cert,   sTestCert_PAI_FFF2_8004_FB_Cert,               CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF2_8005_0023_ValInFuture_Cert,   sTestCert_PAI_FFF2_8005_ValInFuture_Cert,      CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF2_8006_0025_ValInFuture_Cert,   sTestCert_PAA_FFF2_ValInFuture_Cert,           CHIP_NO_ERROR                 },
+        {  sTestCert_DAC_FFF2_8005_0032_Val1SecBefore_Cert, sTestCert_PAI_FFF2_8005_Val1SecBefore_Cert,    CHIP_NO_ERROR                 },
+        // Error cases with invalid (empty Span) inputs:
+        {  sTestCert_DAC_FFF1_8000_0000_Cert,               ByteSpan(),                                    CHIP_ERROR_INVALID_ARGUMENT   },
+        {  ByteSpan(),                                      sTestCert_PAA_FFF1_Cert,                       CHIP_ERROR_INVALID_ARGUMENT   },
+        // Error cases with not yet valid certificate:
+        {  sTestCert_DAC_FFF2_8004_0030_Val1SecBefore_Cert, sTestCert_PAI_FFF2_8004_FB_Cert,               CHIP_ERROR_CERT_EXPIRED       },
+        {  sTestCert_DAC_FFF2_8004_0030_Val1SecBefore_Cert, sTestCert_PAI_FFF2_8004_FB_Cert,               CHIP_ERROR_CERT_EXPIRED       },
+        {  sTestCert_DAC_FFF2_8005_0032_Val1SecBefore_Cert, sTestCert_PAA_NoVID_Cert,                      CHIP_ERROR_CERT_EXPIRED       },
+        {  sTestCert_PAI_FFF2_8004_FB_Cert,                 sTestCert_DAC_FFF2_8004_0021_ValInFuture_Cert, CHIP_ERROR_CERT_EXPIRED       },
+        {  sTestCert_DAC_FFF2_8006_0034_ValInFuture_Cert,   sTestCert_PAI_FFF2_8006_ValInPast_Cert,        CHIP_ERROR_CERT_EXPIRED       },
+    };
+    // clang-format on
 
-    ByteSpan icaCert;
-    err = GetTestCert(TestCert::kICA01, TestCertLoadFlags::kDERForm, icaCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    ByteSpan leafCert;
-    err = GetTestCert(TestCert::kNode01_01, TestCertLoadFlags::kDERForm, leafCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    err = IsCertificateValidAtIssuance(leafCert, icaCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    err = IsCertificateValidAtIssuance(leafCert, rootCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
-
-    err = IsCertificateValidAtIssuance(kDacCert, leafCert);
-    NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
+    for (auto & testCase : sValidationTestCases)
+    {
+        err = IsCertificateValidAtIssuance(testCase.refCert, testCase.evaluatedCert);
+        NL_TEST_ASSERT(inSuite, err == testCase.expectedError);
+    }
 
 #if !defined(CURRENT_TIME_NOT_IMPLEMENTED)
     // test certificate validity (this one contains validity until year 9999 so it will not fail soon)
-    err = IsCertificateValidAtCurrentTime(kDacCert);
+    err = IsCertificateValidAtCurrentTime(sTestCert_DAC_FFF2_8001_0008_Cert);
     NL_TEST_ASSERT(inSuite, err == CHIP_NO_ERROR);
 #endif
 }
@@ -2164,15 +2067,12 @@ static void TestVIDPID_StringExtraction(nlTestSuite * inSuite, void * inContext)
     };
     // clang-format on
 
-    int i = 1;
     for (const auto & testCase : kTestCases)
     {
-        fprintf(stderr, "DEBUG 01 i = %d\n", i);
         AttestationCertVidPid vidpid;
         AttestationCertVidPid vidpidFromCN;
         AttestationCertVidPid vidpidToCheck;
         CHIP_ERROR result = ExtractVIDPIDFromAttributeString(testCase.attrType, testCase.attr, vidpid, vidpidFromCN);
-        fprintf(stderr, "DEBUG 02 i = %d equal = %d\n", i++, (result == testCase.expectedResult));
         NL_TEST_ASSERT(inSuite, result == testCase.expectedResult);
 
         if (testCase.attrType == DNAttrType::kMatterVID || testCase.attrType == DNAttrType::kMatterPID)
@@ -2240,13 +2140,10 @@ static void TestVIDPID_x509Extraction(nlTestSuite * inSuite, void * inContext)
         { kOpCertNoVID, false, false, chip::VendorId::NotSpecified, 0x0000, CHIP_NO_ERROR },
     };
 
-    int i = 1;
     for (const auto & testCase : kTestCases)
     {
-        fprintf(stderr, "DEBUG 01 i = %d\n", i);
         AttestationCertVidPid vidpid;
         CHIP_ERROR result = ExtractVIDPIDFromX509Cert(testCase.cert, vidpid);
-        fprintf(stderr, "DEBUG 02 i = %d equal = %d\n", i++, (result == testCase.expectedResult));
         NL_TEST_ASSERT(inSuite, result == testCase.expectedResult);
         NL_TEST_ASSERT(inSuite, vidpid.mVendorId.HasValue() == testCase.expectedVidPresent);
         NL_TEST_ASSERT(inSuite, vidpid.mProductId.HasValue() == testCase.expectedPidPresent);
@@ -2287,6 +2184,16 @@ const uint8_t kGroupOperationalKey3[Crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYT
 
 const uint16_t kGroupSessionId1 = 0x6c80;
 const uint16_t kGroupSessionId2 = 0x0c48;
+
+static const uint8_t kGroupPrivacyKey1[Crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES] = { 0xb8, 0x27, 0x9f, 0x89, 0x62, 0x1e,
+                                                                                           0xd3, 0x27, 0xa9, 0xc3, 0x9f, 0x6a,
+                                                                                           0x27, 0x24, 0x73, 0x58 };
+static const uint8_t kGroupPrivacyKey2[Crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES] = { 0xf7, 0x25, 0x70, 0xc3, 0xc0, 0x89,
+                                                                                           0xa0, 0xfe, 0x28, 0x75, 0x83, 0x57,
+                                                                                           0xaf, 0xff, 0xb8, 0xd2 };
+static const uint8_t kGroupPrivacyKey3[Crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES] = { 0x01, 0xf8, 0xd1, 0x92, 0x71, 0x26,
+                                                                                           0xf1, 0x94, 0x08, 0x25, 0x72, 0xd4,
+                                                                                           0x9b, 0x1f, 0xdc, 0x73 };
 
 static void TestGroup_OperationalKeyDerivation(nlTestSuite * inSuite, void * inContext)
 {
@@ -2333,6 +2240,31 @@ static void TestGroup_SessionIdDerivation(nlTestSuite * inSuite, void * inContex
     NL_TEST_ASSERT(inSuite, kGroupSessionId2 == session_id);
 }
 
+static void TestGroup_PrivacyKeyDerivation(nlTestSuite * inSuite, void * inContext)
+{
+    uint8_t key_buffer[Crypto::CHIP_CRYPTO_SYMMETRIC_KEY_LENGTH_BYTES] = { 0 };
+    ByteSpan encryption_key;
+    MutableByteSpan privacy_key(key_buffer, sizeof(key_buffer));
+
+    // Invalid Epoch Key
+    NL_TEST_ASSERT(inSuite, CHIP_ERROR_INVALID_ARGUMENT == DeriveGroupPrivacyKey(ByteSpan(), privacy_key));
+
+    // Epoch Key 1
+    encryption_key = ByteSpan(kGroupOperationalKey1, sizeof(kGroupOperationalKey1));
+    NL_TEST_ASSERT(inSuite, CHIP_NO_ERROR == DeriveGroupPrivacyKey(encryption_key, privacy_key));
+    NL_TEST_ASSERT(inSuite, 0 == memcmp(privacy_key.data(), kGroupPrivacyKey1, sizeof(kGroupPrivacyKey1)));
+
+    // Epoch Key 2
+    encryption_key = ByteSpan(kGroupOperationalKey2, sizeof(kGroupOperationalKey2));
+    NL_TEST_ASSERT(inSuite, CHIP_NO_ERROR == DeriveGroupPrivacyKey(encryption_key, privacy_key));
+    NL_TEST_ASSERT(inSuite, 0 == memcmp(privacy_key.data(), kGroupPrivacyKey2, sizeof(kGroupPrivacyKey2)));
+
+    // Epoch Key 3 (example from spec)
+    encryption_key = ByteSpan(kGroupOperationalKey3, sizeof(kGroupOperationalKey3));
+    NL_TEST_ASSERT(inSuite, CHIP_NO_ERROR == DeriveGroupPrivacyKey(encryption_key, privacy_key));
+    NL_TEST_ASSERT(inSuite, 0 == memcmp(privacy_key.data(), kGroupPrivacyKey3, sizeof(kGroupPrivacyKey3)));
+}
+
 /**
  *   Test Suite. It lists all the test functions.
  */
@@ -2347,25 +2279,15 @@ static const nlTest sTests[] = {
     NL_TEST_DEF("Test decrypting AES-CCM-128 invalid key", TestAES_CCM_128DecryptInvalidKey),
     NL_TEST_DEF("Test decrypting AES-CCM-128 invalid nonce", TestAES_CCM_128DecryptInvalidNonceLen),
     NL_TEST_DEF("Test decrypting AES-CCM-128 Containers", TestAES_CCM_128Containers),
-    NL_TEST_DEF("Test encrypting AES-CCM-256 test vectors", TestAES_CCM_256EncryptTestVectors),
-    NL_TEST_DEF("Test decrypting AES-CCM-256 test vectors", TestAES_CCM_256DecryptTestVectors),
-    NL_TEST_DEF("Test encrypting AES-CCM-256 using nil key", TestAES_CCM_256EncryptNilKey),
-    NL_TEST_DEF("Test encrypting AES-CCM-256 using invalid nonce", TestAES_CCM_256EncryptInvalidNonceLen),
-    NL_TEST_DEF("Test encrypting AES-CCM-256 using invalid tag", TestAES_CCM_256EncryptInvalidTagLen),
-    NL_TEST_DEF("Test decrypting AES-CCM-256 invalid key", TestAES_CCM_256DecryptInvalidKey),
-    NL_TEST_DEF("Test decrypting AES-CCM-256 invalid nonce", TestAES_CCM_256DecryptInvalidNonceLen),
-    NL_TEST_DEF("Test decrypting AES-CCM-256 invalid vectors", TestAES_CCM_256DecryptInvalidTestVectors),
     NL_TEST_DEF("Test ASN.1 signature conversion routines", TestAsn1Conversions),
     NL_TEST_DEF("Test Integer to ASN.1 DER conversion", TestRawIntegerToDerValidCases),
     NL_TEST_DEF("Test Integer to ASN.1 DER conversion error cases", TestRawIntegerToDerInvalidCases),
     NL_TEST_DEF("Test ECDSA signing and validation message using SHA256", TestECDSA_Signing_SHA256_Msg),
     NL_TEST_DEF("Test ECDSA signing and validation SHA256 Hash", TestECDSA_Signing_SHA256_Hash),
     NL_TEST_DEF("Test ECDSA signature validation fail - Different msg", TestECDSA_ValidationFailsDifferentMessage),
-    NL_TEST_DEF("Test ECDSA signature validation fail - Different hash", TestECDSA_ValidationFailsDifferentHash),
     NL_TEST_DEF("Test ECDSA signature validation fail - Different msg signature", TestECDSA_ValidationFailIncorrectMsgSignature),
     NL_TEST_DEF("Test ECDSA signature validation fail - Different hash signature", TestECDSA_ValidationFailIncorrectHashSignature),
     NL_TEST_DEF("Test ECDSA sign msg invalid parameters", TestECDSA_SigningMsgInvalidParams),
-    NL_TEST_DEF("Test ECDSA sign hash invalid parameters", TestECDSA_SigningHashInvalidParams),
     NL_TEST_DEF("Test ECDSA msg signature validation invalid parameters", TestECDSA_ValidationMsgInvalidParam),
     NL_TEST_DEF("Test ECDSA hash signature validation invalid parameters", TestECDSA_ValidationHashInvalidParam),
     NL_TEST_DEF("Test Hash SHA 256", TestHash_SHA256),
@@ -2378,7 +2300,9 @@ static const nlTest sTests[] = {
     NL_TEST_DEF("Test adding entropy sources", TestAddEntropySources),
     NL_TEST_DEF("Test PBKDF2 SHA256", TestPBKDF2_SHA256_TestVectors),
     NL_TEST_DEF("Test P256 Keygen", TestP256_Keygen),
-    NL_TEST_DEF("Test CSR Generation", TestCSR_Gen),
+    NL_TEST_DEF("Test CSR Verification + PK extraction", TestCSR_Verify),
+    NL_TEST_DEF("Test CSR Generation via P256Keypair method", TestCSR_GenByKeypair),
+    NL_TEST_DEF("Test Direct CSR Generation", TestCSR_GenDirect),
     NL_TEST_DEF("Test Keypair Serialize", TestKeypair_Serialize),
     NL_TEST_DEF("Test Spake2p_spake2p FEMul", TestSPAKE2P_spake2p_FEMul),
     NL_TEST_DEF("Test Spake2p_spake2p FELoad/FEWrite", TestSPAKE2P_spake2p_FELoadWrite),
@@ -2391,9 +2315,6 @@ static const nlTest sTests[] = {
     NL_TEST_DEF("Test Spake2+ object reuse", TestSPAKE2P_Reuse),
     NL_TEST_DEF("Test compressed fabric identifier", TestCompressedFabricIdentifier),
     NL_TEST_DEF("Test Pubkey Extraction from x509 Certificate", TestPubkey_x509Extraction),
-#if CHIP_CRYPTO_OPENSSL
-    NL_TEST_DEF("Test x509 Certificate Extraction from PKCS7", TestX509_PKCS7Extraction),
-#endif // CHIP_CRYPTO_OPENSSL
     NL_TEST_DEF("Test x509 Certificate Chain Validation", TestX509_CertChainValidation),
     NL_TEST_DEF("Test x509 Certificate Timestamp Validation", TestX509_IssuingTimestampValidation),
     NL_TEST_DEF("Test Subject Key Id Extraction from x509 Certificate", TestSKID_x509Extraction),
@@ -2402,6 +2323,7 @@ static const nlTest sTests[] = {
     NL_TEST_DEF("Test Vendor ID and Product ID Extraction from x509 Attestation Certificate", TestVIDPID_x509Extraction),
     NL_TEST_DEF("Test Group Operation Key Derivation", TestGroup_OperationalKeyDerivation),
     NL_TEST_DEF("Test Group Session ID Derivation", TestGroup_SessionIdDerivation),
+    NL_TEST_DEF("Test Group Privacy Key Derivation", TestGroup_PrivacyKeyDerivation),
     NL_TEST_SENTINEL()
 };
 

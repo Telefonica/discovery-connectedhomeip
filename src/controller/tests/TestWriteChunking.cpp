@@ -21,7 +21,7 @@
 #include "app/ConcreteAttributePath.h"
 #include "protocols/interaction_model/Constants.h"
 #include <app-common/zap-generated/cluster-objects.h>
-#include <app/AppBuildConfig.h>
+#include <app/AppConfig.h>
 #include <app/AttributeAccessInterface.h>
 #include <app/CommandHandlerInterface.h>
 #include <app/InteractionModelEngine.h>
@@ -32,6 +32,7 @@
 #include <app/util/attribute-storage.h>
 #include <controller/InvokeInteraction.h>
 #include <lib/support/ErrorStr.h>
+#include <lib/support/UnitTestContext.h>
 #include <lib/support/UnitTestRegistration.h>
 #include <lib/support/logging/CHIPLogging.h>
 #include <messaging/tests/MessagingContext.h>
@@ -521,7 +522,7 @@ void RunTest(nlTestSuite * apSuite, TestContext & ctx, Instructions instructions
     testServer.mOnListWriteBegin = [&](const ConcreteAttributePath & aPath) {
         NL_TEST_ASSERT(apSuite, onGoingPath == ConcreteAttributePath());
         onGoingPath = aPath;
-        ChipLogProgress(Zcl, "OnListWriteBegin endpoint=%" PRIu16 " Cluster=" ChipLogFormatMEI " attribute=" ChipLogFormatMEI,
+        ChipLogProgress(Zcl, "OnListWriteBegin endpoint=%u Cluster=" ChipLogFormatMEI " attribute=" ChipLogFormatMEI,
                         aPath.mEndpointId, ChipLogValueMEI(aPath.mClusterId), ChipLogValueMEI(aPath.mAttributeId));
         if (instructions.onListWriteBeginActions)
         {
@@ -539,7 +540,7 @@ void RunTest(nlTestSuite * apSuite, TestContext & ctx, Instructions instructions
         NL_TEST_ASSERT(apSuite, onGoingPath == aPath);
         status.push_back(PathStatus(aPath, aWasSuccessful));
         onGoingPath = ConcreteAttributePath();
-        ChipLogProgress(Zcl, "OnListWriteEnd endpoint=%" PRIu16 " Cluster=" ChipLogFormatMEI " attribute=" ChipLogFormatMEI,
+        ChipLogProgress(Zcl, "OnListWriteEnd endpoint=%u Cluster=" ChipLogFormatMEI " attribute=" ChipLogFormatMEI,
                         aPath.mEndpointId, ChipLogValueMEI(aPath.mClusterId), ChipLogValueMEI(aPath.mAttributeId));
     };
 
@@ -579,7 +580,8 @@ void RunTest(nlTestSuite * apSuite, TestContext & ctx, Instructions instructions
     err = writeClient->SendWriteRequest(sessionHandle);
     NL_TEST_ASSERT(apSuite, err == CHIP_NO_ERROR);
 
-    ctx.GetIOContext().DriveIOUntil(System::Clock::Seconds16(15),
+    ctx.GetIOContext().DriveIOUntil(sessionHandle->ComputeRoundTripTimeout(app::kExpectedIMProcessingTime) +
+                                        System::Clock::Seconds16(1),
                                     [&]() { return ctx.GetExchangeManager().GetNumActiveExchanges() == 0; });
 
     NL_TEST_ASSERT(apSuite, onGoingPath == app::ConcreteAttributePath());
@@ -727,7 +729,7 @@ nlTestSuite sSuite =
 {
     "TestWriteChunking",
     &sTests[0],
-    TestContext::InitializeAsync,
+    TestContext::Initialize,
     TestContext::Finalize
 };
 // clang-format on
@@ -736,10 +738,8 @@ nlTestSuite sSuite =
 
 int TestWriteChunkingTests()
 {
-    TestContext gContext;
     gSuite = &sSuite;
-    nlTestRunner(&sSuite, &gContext);
-    return (nlTestRunnerStats(&sSuite));
+    return chip::ExecuteTestsWithContext<TestContext>(&sSuite);
 }
 
 CHIP_REGISTER_TEST_SUITE(TestWriteChunkingTests)

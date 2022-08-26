@@ -25,6 +25,7 @@
 #pragma once
 #include <stdint.h>
 
+#include <inet/IPAddress.h>
 #include <lib/core/DataModelTypes.h>
 
 namespace chip {
@@ -133,25 +134,11 @@ enum PublicEventTypes
     kServiceConnectivityChange,
 
     /**
-     * Fabric Membership Change
-     *
-     * Signals a change in the device's membership in a chip fabric.
-     */
-    kFabricMembershipChange,
-
-    /**
      * Service Provisioning Change
      *
      * Signals a change to the device's service provisioning state.
      */
     kServiceProvisioningChange,
-
-    /**
-     * Account Pairing Change
-     *
-     * Signals a change to the device's state with respect to being paired to a user account.
-     */
-    kAccountPairingChange,
 
     /**
      * Time Sync Change
@@ -161,18 +148,11 @@ enum PublicEventTypes
     kTimeSyncChange,
 
     /**
-     * SED Polling Interval Change
+     * SED Interval Change
      *
-     * Signals a change to the sleepy end device polling interval.
+     * Signals a change to the sleepy end device interval.
      */
-    kSEDPollingIntervalChange,
-
-    /**
-     * Security Session Established
-     *
-     * Signals that an external entity has established a new security session with the device.
-     */
-    kSessionEstablished,
+    kSEDIntervalChange,
 
     /**
      * CHIPoBLE Connection Established
@@ -307,6 +287,34 @@ enum ActivityChange
 enum OtaState
 {
     kOtaSpaceAvailable = 0,
+    /**
+     * This state indicates that Node is currently downloading a software update.
+     */
+    kOtaDownloadInProgress,
+    /**
+     * This state indicates that Node has successfully downloaded a software update.
+     */
+    kOtaDownloadComplete,
+    /**
+     * This state indicates that Node has failed to download a software update.
+     */
+    kOtaDownloadFailed,
+    /**
+     * This state indicates that Node has aborted the download of a software update.
+     */
+    kOtaDownloadAborted,
+    /**
+     * This state indicate that Node is currently in the process of verifying and applying a software update.
+     */
+    kOtaApplyInProgress,
+    /**
+     * This state indicates that Node has successfully applied a software update.
+     */
+    kOtaApplyComplete,
+    /**
+     * This state indicates that Node has failed to apply a software update.
+     */
+    kOtaApplyFailed,
 };
 
 inline ConnectivityChange GetConnectivityChange(bool prevState, bool newState)
@@ -373,7 +381,14 @@ struct ChipDeviceEvent final
         {
             ConnectivityChange IPv4;
             ConnectivityChange IPv6;
-            char address[INET6_ADDRSTRLEN];
+            // WARNING: There used to be `char address[INET6_ADDRSTRLEN]` here and it is
+            //          deprecated/removed since it was too large and only used for logging.
+            //          Consider not relying on ipAddress field either since the platform
+            //          layer *does not actually validate* that the actual internet is reachable
+            //          before issuing this event *and* there may be multiple addresses
+            //          (especially IPv6) so it's recommended to use `ChipDevicePlatformEvent`
+            //          instead and do something that is better for your platform.
+            chip::Inet::IPAddress ipAddress;
         } InternetConnectivityChange;
         struct
         {
@@ -462,15 +477,15 @@ struct ChipDeviceEvent final
 
         struct
         {
-            uint64_t PeerNodeId;
-            FabricIndex PeerFabricIndex;
+            uint64_t nodeId;
+            FabricIndex fabricIndex;
         } CommissioningComplete;
 
         struct
         {
-            FabricIndex PeerFabricIndex;
-            bool AddNocCommandHasBeenInvoked;
-            bool UpdateNocCommandHasBeenInvoked;
+            FabricIndex fabricIndex;
+            bool addNocCommandHasBeenInvoked;
+            bool updateNocCommandHasBeenInvoked;
         } FailSafeTimerExpired;
 
         struct

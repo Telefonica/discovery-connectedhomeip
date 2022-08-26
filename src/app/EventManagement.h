@@ -36,7 +36,6 @@
 #include <lib/core/CHIPCircularTLVBuffer.h>
 #include <lib/support/CHIPCounter.h>
 #include <messaging/ExchangeMgr.h>
-#include <system/SystemMutex.h>
 
 #define CHIP_CONFIG_EVENT_GLOBAL_PRIORITY PriorityLevel::Debug
 
@@ -195,7 +194,8 @@ public:
      *
      */
     void Init(Messaging::ExchangeManager * apExchangeManager, uint32_t aNumBuffers, CircularEventBuffer * apCircularEventBuffer,
-              const LogStorageResources * const apLogStorageResources, MonotonicallyIncreasingCounter * apEventNumberCounter);
+              const LogStorageResources * const apLogStorageResources,
+              MonotonicallyIncreasingCounter<EventNumber> * apEventNumberCounter);
 
     static EventManagement & GetInstance();
 
@@ -224,21 +224,9 @@ public:
     static void CreateEventManagement(Messaging::ExchangeManager * apExchangeManager, uint32_t aNumBuffers,
                                       CircularEventBuffer * apCircularEventBuffer,
                                       const LogStorageResources * const apLogStorageResources,
-                                      MonotonicallyIncreasingCounter * apEventNumberCounter);
+                                      MonotonicallyIncreasingCounter<EventNumber> * apEventNumberCounter);
 
     static void DestroyEventManagement();
-
-#if !CHIP_SYSTEM_CONFIG_NO_LOCKING
-    class ScopedLock
-    {
-    public:
-        ScopedLock(EventManagement & aEventManagement) : mEventManagement(aEventManagement) { mEventManagement.mAccessLock.Lock(); }
-        ~ScopedLock() { mEventManagement.mAccessLock.Unlock(); }
-
-    private:
-        EventManagement & mEventManagement;
-    };
-#endif // !CHIP_SYSTEM_CONFIG_NO_LOCKING
 
     /**
      * @brief
@@ -336,6 +324,11 @@ public:
     CHIP_ERROR FetchEventsSince(chip::TLV::TLVWriter & aWriter, const ObjectList<EventPathParams> * apEventPathList,
                                 EventNumber & aEventMin, size_t & aEventCount,
                                 const Access::SubjectDescriptor & aSubjectDescriptor);
+    /**
+     * @brief brief Iterate all events and invalidate the fabric-sensitive events whose associated fabric has the given fabric
+     * index.
+     */
+    CHIP_ERROR FabricRemoved(FabricIndex aFabricIndex);
 
     /**
      * @brief
@@ -377,7 +370,7 @@ private:
         EndpointId mEndpointId   = 0;
         EventId mEventId         = 0;
         EventNumber mEventNumber = 0;
-        FabricIndex mFabricIndex = kUndefinedFabricIndex;
+        Optional<FabricIndex> mFabricIndex;
     };
 
     void VendEventNumber();
@@ -417,6 +410,16 @@ private:
      *
      */
     CHIP_ERROR EnsureSpaceInCircularBuffer(size_t aRequiredSpace);
+
+    /**
+     * @brief Iterate the event elements inside event tlv and mark the fabric index as kUndefinedFabricIndex if
+     * it matches the FabricIndex apFabricIndex points to.
+     *
+     * @param[in] aReader  event tlv reader
+     * @param[in] apFabricIndex   A FabricIndex* pointing to the fabric index for which we want to effectively evict events.
+     *
+     */
+    static CHIP_ERROR FabricRemovedCB(const TLV::TLVReader & aReader, size_t, void * apFabricIndex);
 
     /**
      * @brief
@@ -488,11 +491,6 @@ private:
     static CHIP_ERROR CopyEvent(const TLV::TLVReader & aReader, TLV::TLVWriter & aWriter, EventLoadOutContext * apContext);
 
     /**
-     * @brief construct EventStatusIB to target buffer for report
-     */
-    static CHIP_ERROR WriteEventStatusIB(TLV::TLVWriter & aWriter, const ConcreteEventPath & aEvent, StatusIB aStatus);
-
-    /**
      * @brief
      *   A function to get the circular buffer for particular priority
      *
@@ -507,12 +505,9 @@ private:
     Messaging::ExchangeManager * mpExchangeMgr = nullptr;
     EventManagementStates mState               = EventManagementStates::Shutdown;
     uint32_t mBytesWritten                     = 0;
-#if !CHIP_SYSTEM_CONFIG_NO_LOCKING
-    System::Mutex mAccessLock;
-#endif // !CHIP_SYSTEM_CONFIG_NO_LOCKING
 
     // The counter we're going to use for event numbers.
-    MonotonicallyIncreasingCounter * mpEventNumberCounter = nullptr;
+    MonotonicallyIncreasingCounter<EventNumber> * mpEventNumberCounter = nullptr;
 
     EventNumber mLastEventNumber = 0; ///< Last event Number vended
     Timestamp mLastEventTimestamp;    ///< The timestamp of the last event in this buffer

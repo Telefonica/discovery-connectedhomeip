@@ -22,7 +22,7 @@
 #include "app/ConcreteAttributePath.h"
 #include "protocols/interaction_model/Constants.h"
 #include <app-common/zap-generated/cluster-objects.h>
-#include <app/AppBuildConfig.h>
+#include <app/AppConfig.h>
 #include <app/AttributeAccessInterface.h>
 #include <app/BufferedReadCallback.h>
 #include <app/CommandHandlerInterface.h>
@@ -35,6 +35,7 @@
 #include <controller/InvokeInteraction.h>
 #include <lib/support/ErrorStr.h>
 #include <lib/support/TimeUtils.h>
+#include <lib/support/UnitTestContext.h>
 #include <lib/support/UnitTestRegistration.h>
 #include <lib/support/UnitTestUtils.h>
 #include <lib/support/logging/CHIPLogging.h>
@@ -54,9 +55,9 @@ static chip::app::CircularEventBuffer gCircularEventBuffer[3];
 class TestContext : public chip::Test::AppContext
 {
 public:
-    static int InitializeAsync(void * context)
+    static int Initialize(void * context)
     {
-        if (AppContext::InitializeAsync(context) != SUCCESS)
+        if (AppContext::Initialize(context) != SUCCESS)
             return FAILURE;
 
         auto * ctx = static_cast<TestContext *>(context);
@@ -90,7 +91,7 @@ public:
     }
 
 private:
-    MonotonicallyIncreasingCounter mEventCounter;
+    MonotonicallyIncreasingCounter<EventNumber> mEventCounter;
 };
 
 nlTestSuite * gSuite = nullptr;
@@ -126,7 +127,7 @@ class TestReadCallback : public app::ClusterStateCache::Callback
 {
 public:
     TestReadCallback() : mClusterCacheAdapter(*this) {}
-    void OnDone() {}
+    void OnDone(app::ReadClient *) {}
 
     app::ClusterStateCache mClusterCacheAdapter;
 };
@@ -187,7 +188,7 @@ void TestReadEvents::TestBasicCaching(nlTestSuite * apSuite, void * apContext)
 
     readParams.mpEventPathParamsList    = &eventPath;
     readParams.mEventPathParamsListSize = 1;
-    readParams.mEventNumber             = firstEventNumber;
+    readParams.mEventNumber.SetValue(firstEventNumber);
 
     TestReadCallback readCallback;
 
@@ -215,6 +216,10 @@ void TestReadEvents::TestBasicCaching(nlTestSuite * apSuite, void * apContext)
             });
 
         NL_TEST_ASSERT(apSuite, generationCount == 5);
+
+        Optional<EventNumber> highestEventNumber;
+        readCallback.mClusterCacheAdapter.GetHighestReceivedEventNumber(highestEventNumber);
+        NL_TEST_ASSERT(apSuite, highestEventNumber.HasValue() && highestEventNumber.Value() == 4);
 
         //
         // Re-run the iterator but pass in a path filter: EP*/TestCluster/EID*
@@ -337,6 +342,10 @@ void TestReadEvents::TestBasicCaching(nlTestSuite * apSuite, void * apContext)
 
         NL_TEST_ASSERT(apSuite, generationCount == 10);
 
+        Optional<EventNumber> highestEventNumber;
+        readCallback.mClusterCacheAdapter.GetHighestReceivedEventNumber(highestEventNumber);
+        NL_TEST_ASSERT(apSuite, highestEventNumber.HasValue() && highestEventNumber.Value() == 9);
+
         readCallback.mClusterCacheAdapter.ClearEventCache();
         generationCount = 0;
         readCallback.mClusterCacheAdapter.ForEachEventData([&generationCount](const app::EventHeader & header) {
@@ -345,6 +354,8 @@ void TestReadEvents::TestBasicCaching(nlTestSuite * apSuite, void * apContext)
         });
 
         NL_TEST_ASSERT(apSuite, generationCount == 0);
+        readCallback.mClusterCacheAdapter.GetHighestReceivedEventNumber(highestEventNumber);
+        NL_TEST_ASSERT(apSuite, highestEventNumber.HasValue() && highestEventNumber.Value() == 9);
     }
 
     //
@@ -379,6 +390,50 @@ void TestReadEvents::TestBasicCaching(nlTestSuite * apSuite, void * apContext)
             });
 
         NL_TEST_ASSERT(apSuite, generationCount == 10);
+        Optional<EventNumber> highestEventNumber;
+        readCallback.mClusterCacheAdapter.GetHighestReceivedEventNumber(highestEventNumber);
+        NL_TEST_ASSERT(apSuite, highestEventNumber.HasValue() && highestEventNumber.Value() == 9);
+    }
+
+    //
+    // Set user-provided event number, then read client would use user-provided event number and not use the cached one in read
+    // client
+    //
+
+    {
+        readParams.mEventNumber.SetValue(5);
+        app::ReadClient readClient(engine, &ctx.GetExchangeManager(), readCallback.mClusterCacheAdapter.GetBufferedCallback(),
+                                   app::ReadClient::InteractionType::Read);
+        readCallback.mClusterCacheAdapter.ClearEventCache(true);
+        NL_TEST_ASSERT(apSuite, readClient.SendRequest(readParams) == CHIP_NO_ERROR);
+
+        ctx.DrainAndServiceIO();
+
+        //
+        // Validate that we would receive 5 events
+        //
+
+        uint8_t generationCount = 5;
+        readCallback.mClusterCacheAdapter.ForEachEventData(
+            [&apSuite, &readCallback, &generationCount](const app::EventHeader & header) {
+                NL_TEST_ASSERT(apSuite, header.mPath.mClusterId == TestCluster::Id);
+                NL_TEST_ASSERT(apSuite, header.mPath.mEventId == TestCluster::Events::TestEvent::Id);
+                NL_TEST_ASSERT(apSuite, header.mPath.mEndpointId == kTestEndpointId);
+
+                TestCluster::Events::TestEvent::DecodableType eventData;
+                NL_TEST_ASSERT(apSuite, readCallback.mClusterCacheAdapter.Get(header.mEventNumber, eventData) == CHIP_NO_ERROR);
+
+                NL_TEST_ASSERT(apSuite, eventData.arg1 == generationCount);
+                generationCount++;
+
+                return CHIP_NO_ERROR;
+            });
+
+        NL_TEST_ASSERT(apSuite, generationCount == 10);
+
+        Optional<EventNumber> highestEventNumber;
+        readCallback.mClusterCacheAdapter.GetHighestReceivedEventNumber(highestEventNumber);
+        NL_TEST_ASSERT(apSuite, highestEventNumber.HasValue() && highestEventNumber.Value() == 9);
     }
 
     NL_TEST_ASSERT(apSuite, ctx.GetExchangeManager().GetNumActiveExchanges() == 0);
@@ -400,7 +455,7 @@ nlTestSuite sSuite =
 {
     "TestEventCaching",
     &sTests[0],
-    TestContext::InitializeAsync,
+    TestContext::Initialize,
     TestContext::Finalize
 };
 // clang-format on
@@ -409,10 +464,8 @@ nlTestSuite sSuite =
 
 int TestEventCaching()
 {
-    TestContext gContext;
     gSuite = &sSuite;
-    nlTestRunner(&sSuite, &gContext);
-    return (nlTestRunnerStats(&sSuite));
+    return chip::ExecuteTestsWithContext<TestContext>(&sSuite);
 }
 
 CHIP_REGISTER_TEST_SUITE(TestEventCaching)

@@ -65,7 +65,8 @@ server cluster AccessControl = 31 {
   }
 
   // Response structures are used for command outputs
-  response struct ConnectNetworkResponse {
+  // Responses are encoded as a command and use a unique ID for encoding
+  response struct ConnectNetworkResponse = 123 {
     CHAR_STRING debugText = 1;
     INT32S errorValue = 2;
   }
@@ -93,6 +94,10 @@ server cluster AccessControl = 31 {
   // These defaults can be modified to any of view/operate/manage/administer roles.
   attribute access(read: manage, write: administer) int32u customAcl = 3;
 
+  // Attributes may be fabric-scoped as well by tagging them as `fabric`.
+  fabric readonly attribute int16u myFabricAttr = 22;
+  fabric attribute(read: view, write: administer) int16u someFabricRWAttribute = 33;
+
   // attributes may be read-only as well
   readonly attribute int16u clusterRevision = 65533;
 
@@ -115,6 +120,15 @@ server cluster AccessControl = 31 {
   // command invocation default to "operate" privilege, however these
   // can be modified as well
   command access(invoke: administer) Off(): DefaultSuccess = 4;
+
+  // command invocation can require timed invoke usage
+  timed command RequiresTimedInvok(): DefaultSuccess = 5;
+
+  // commands may be fabric scoped
+  fabric command RequiresTimedInvok(): DefaultSuccess = 6;
+
+  // commands may have multiple attributes
+  fabric timed command RequiresTimedInvok(): DefaultSuccess = 7;
 }
 
 // A client cluster represents something that is used by an app
@@ -149,7 +163,23 @@ endpoint 0 {
   // A server cluster is a server that gets exposed to the world.
   //
   // As an example, a light bulb may expose a OnOff cluster.
-  server  cluster OtaSoftwareUpdateRequestor;
+  server  cluster OtaSoftwareUpdateRequestor {
+
+    // Each endpoint server cluster instantiations will have individual
+    // attributes chosen for storage/defaults
+    //
+    // If no storage default is given, the value is initialized with 0/false/empty
+    //
+    // Defaults are currently only supported for primitive types (i.e. not
+    // list/struct/array, but supports strings)
+
+    ram attribute zeroInit;                    // initialized with 0.
+    ram attribute stringDefault default="abc"; // Strings can have defaults.
+    ram attribute boolDefault   default=true;  // bools can have defaults.
+    ram attribute inRam default=123;           // stored in RAM, lost on reboot.
+    persist attribute persist;                 // persisted in NVM across reboot.
+    callback attribute usesCallback;           // the zap/ember 'EXTERNAL' callback.
+  }
 }
 
 ```

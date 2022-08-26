@@ -31,6 +31,7 @@
 #include <app-common/zap-generated/attribute-id.h>
 #include <app-common/zap-generated/cluster-id.h>
 #include <app/CommandHandler.h>
+#include <app/clusters/identify-server/identify-server.h>
 #include <app/server/Dnssd.h>
 #include <app/util/basic-types.h>
 #include <app/util/util.h>
@@ -56,10 +57,6 @@ void DeviceCallbacks::DeviceEventCallback(const ChipDeviceEvent * event, intptr_
         OnInternetConnectivityChange(event);
         break;
 
-    case DeviceEventType::kSessionEstablished:
-        OnSessionEstablished(event);
-        break;
-
     case DeviceEventType::kCHIPoBLEConnectionEstablished:
         log_info("CHIPoBLE connection established\r\n");
         break;
@@ -74,9 +71,7 @@ void DeviceCallbacks::DeviceEventCallback(const ChipDeviceEvent * event, intptr_
 
     case DeviceEventType::kWiFiConnectivityChange:
         log_info("Got ip, start advertise\r\n");
-        // chip::app::DnssdServer::Instance().AdvertiseOperational();
         chip::app::DnssdServer::Instance().StartServer();
-        GetAppTask().OtaTask();
         NetworkCommissioning::BLWiFiDriver::GetInstance().SaveConfiguration();
         break;
 
@@ -94,8 +89,8 @@ void DeviceCallbacks::DeviceEventCallback(const ChipDeviceEvent * event, intptr_
     }
 }
 
-void DeviceCallbacks::PostAttributeChangeCallback(EndpointId endpointId, ClusterId clusterId, AttributeId attributeId, uint8_t mask,
-                                                  uint8_t type, uint16_t size, uint8_t * value)
+void DeviceCallbacks::PostAttributeChangeCallback(EndpointId endpointId, ClusterId clusterId, AttributeId attributeId, uint8_t type,
+                                                  uint16_t size, uint8_t * value)
 {
     log_info("PostAttributeChangeCallback - Cluster ID: '0x%04x', EndPoint ID: '0x%02x', Attribute ID: '0x%04x'\r\n", clusterId,
              endpointId, attributeId);
@@ -122,14 +117,14 @@ void DeviceCallbacks::PostAttributeChangeCallback(EndpointId endpointId, Cluster
     }
 
     // TODO
-    // log_info("Current free heap: %zu\r\n\n", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    // log_info("Current free heap: %u\r\n\n", static_cast<unsigned int>(heap_caps_get_free_size(MALLOC_CAP_8BIT)));
 }
 
 void DeviceCallbacks::OnInternetConnectivityChange(const ChipDeviceEvent * event)
 {
     if (event->InternetConnectivityChange.IPv4 == kConnectivity_Established)
     {
-        log_info("Server ready at: %s:%d\r\n", event->InternetConnectivityChange.address, CHIP_PORT);
+        log_info("IPv4 Server ready...\r\n");
         // TODO
         // wifiLED.Set(true);
         chip::app::DnssdServer::Instance().StartServer();
@@ -151,14 +146,6 @@ void DeviceCallbacks::OnInternetConnectivityChange(const ChipDeviceEvent * event
     }
 }
 
-void DeviceCallbacks::OnSessionEstablished(const ChipDeviceEvent * event)
-{
-    if (event->SessionEstablished.IsCommissioner)
-    {
-        log_info("Commissioner detected!\r\n");
-    }
-}
-
 void DeviceCallbacks::OnOnOffPostAttributeChangeCallback(EndpointId endpointId, AttributeId attributeId, uint8_t * value)
 {
     VerifyOrExit(attributeId == ZCL_ON_OFF_ATTRIBUTE_ID, log_info("Unhandled Attribute ID: '0x%04x\r\n", attributeId));
@@ -166,7 +153,7 @@ void DeviceCallbacks::OnOnOffPostAttributeChangeCallback(EndpointId endpointId, 
 
     // At this point we can assume that value points to a bool value.
     mEndpointOnOffState[endpointId - 1] = *value;
-    statusLED1.Set(*value);
+    GetAppTask().LightStateUpdateEventHandler();
 
 exit:
     return;
@@ -181,7 +168,7 @@ void DeviceCallbacks::OnLevelControlAttributeChangeCallback(EndpointId endpointI
     VerifyOrExit(endpointId == 1 || endpointId == 2, log_error("Unexpected EndPoint ID: `0x%02x'\r\n", endpointId));
 
     // At this point we can assume that value points to a bool value.
-    statusLED1.SetBrightness(brightness);
+    GetAppTask().LightStateUpdateEventHandler();
 
 exit:
     return;
@@ -250,3 +237,38 @@ bool emberAfBasicClusterMfgSpecificPingCallback(chip::app::CommandHandler * comm
     emberAfSendDefaultResponse(emberAfCurrentCommand(), EMBER_ZCL_STATUS_SUCCESS);
     return true;
 }
+
+void OnIdentifyStart(Identify *)
+{
+    ChipLogProgress(Zcl, "OnIdentifyStart");
+}
+
+void OnIdentifyStop(Identify *)
+{
+    ChipLogProgress(Zcl, "OnIdentifyStop");
+}
+
+void OnTriggerEffect(Identify * identify)
+{
+    switch (identify->mCurrentEffectIdentifier)
+    {
+    case EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_BLINK:
+        ChipLogProgress(Zcl, "EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_BLINK");
+        break;
+    case EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_BREATHE:
+        ChipLogProgress(Zcl, "EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_BREATHE");
+        break;
+    case EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_OKAY:
+        ChipLogProgress(Zcl, "EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_OKAY");
+        break;
+    case EMBER_ZCL_IDENTIFY_EFFECT_IDENTIFIER_CHANNEL_CHANGE:
+        break;
+    default:
+        ChipLogProgress(Zcl, "No identifier effect");
+        return;
+    }
+}
+
+static Identify gIdentify1 = {
+    chip::EndpointId{ 1 }, OnIdentifyStart, OnIdentifyStop, EMBER_ZCL_IDENTIFY_IDENTIFY_TYPE_VISIBLE_LED, OnTriggerEffect,
+};

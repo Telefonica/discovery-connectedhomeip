@@ -40,7 +40,7 @@ namespace Test {
 CHIP_ERROR AppContext::Init()
 {
     ReturnErrorOnFailure(Super::Init());
-    ReturnErrorOnFailure(chip::app::InteractionModelEngine::GetInstance()->Init(&GetExchangeManager()));
+    ReturnErrorOnFailure(chip::app::InteractionModelEngine::GetInstance()->Init(&GetExchangeManager(), &GetFabricTable()));
 
     Access::SetAccessControl(gPermissiveAccessControl);
     ReturnErrorOnFailure(
@@ -49,14 +49,12 @@ CHIP_ERROR AppContext::Init()
     return CHIP_NO_ERROR;
 }
 
-CHIP_ERROR AppContext::Shutdown()
+void AppContext::Shutdown()
 {
-    ReturnErrorOnFailure(Access::GetAccessControl().Finish());
+    Access::GetAccessControl().Finish();
 
     chip::app::InteractionModelEngine::GetInstance()->Shutdown();
-    ReturnErrorOnFailure(Super::Shutdown());
-
-    return CHIP_NO_ERROR;
+    Super::Shutdown();
 }
 
 } // namespace Test

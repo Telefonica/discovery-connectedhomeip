@@ -17,6 +17,7 @@
 
 #include "MediaPlaybackManager.h"
 #include "TvApp-JNI.h"
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <cstdint>
 #include <jni.h>
@@ -172,7 +173,7 @@ void MediaPlaybackManager::InitializeWithObjects(jobject managerObject)
     }
 
     mGetPositionMethod =
-        env->GetMethodID(mMediaPlaybackManagerClass, "getPosition", "()[Lcom/tcl/chip/tvapp/MediaPlaybackPosition;");
+        env->GetMethodID(mMediaPlaybackManagerClass, "getPosition", "()Lcom/matter/tv/server/tvapp/MediaPlaybackPosition;");
     if (mGetPositionMethod == nullptr)
     {
         ChipLogError(Zcl, "Failed to access MediaPlaybackManager 'getPosition' method");
@@ -243,14 +244,14 @@ Commands::PlaybackResponse::Type MediaPlaybackManager::HandleMediaRequest(MediaP
         ChipLogError(AppServer, "Java exception in MediaPlaybackManager::Request %d", mediaPlaybackRequest);
         env->ExceptionDescribe();
         env->ExceptionClear();
-        response.status = StatusEnum::kInvalidStateForCommand;
+        response.status = MediaPlaybackStatusEnum::kInvalidStateForCommand;
     }
-    response.status = static_cast<StatusEnum>(ret);
+    response.status = static_cast<MediaPlaybackStatusEnum>(ret);
 
 exit:
     if (err != CHIP_NO_ERROR)
     {
-        response.status = StatusEnum::kInvalidStateForCommand;
+        response.status = MediaPlaybackStatusEnum::kInvalidStateForCommand;
         ChipLogError(Zcl, "MediaPlaybackManager::HandleMediaRequest status error: %s", err.AsString());
     }
 
@@ -297,4 +298,16 @@ exit:
     }
 
     return aEncoder.Encode(response);
+}
+
+uint32_t MediaPlaybackManager::GetFeatureMap(chip::EndpointId endpoint)
+{
+    if (endpoint >= EMBER_AF_CONTENT_LAUNCH_CLUSTER_SERVER_ENDPOINT_COUNT)
+    {
+        return mDynamicEndpointFeatureMap;
+    }
+
+    uint32_t featureMap = 0;
+    Attributes::FeatureMap::Get(endpoint, &featureMap);
+    return featureMap;
 }

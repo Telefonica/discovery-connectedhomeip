@@ -18,15 +18,19 @@
 
 #pragma once
 
+#ifdef CONFIG_USE_LOCAL_STORAGE
 #include "../../config/PersistentStorage.h"
+#endif // CONFIG_USE_LOCAL_STORAGE
+
 #include "Command.h"
+
 #include <commands/common/CredentialIssuerCommands.h>
 #include <commands/example/ExampleCredentialIssuerCommands.h>
 #include <credentials/GroupDataProviderImpl.h>
+#include <credentials/PersistentStorageOpCertStore.h>
+#include <crypto/PersistentStorageOperationalKeystore.h>
 
 #pragma once
-
-class PersistentStorage;
 
 constexpr const char kIdentityAlpha[] = "alpha";
 constexpr const char kIdentityBeta[]  = "beta";
@@ -45,7 +49,6 @@ constexpr const char kIdentityNull[] = "null-fabric-commissioner";
 class CHIPCommand : public Command
 {
 public:
-    using ChipDevice             = ::chip::DeviceProxy;
     using ChipDeviceCommissioner = ::chip::Controller::DeviceCommissioner;
     using ChipDeviceController   = ::chip::Controller::DeviceController;
     using IPAddress              = ::chip::Inet::IPAddress;
@@ -56,15 +59,24 @@ public:
     static constexpr uint16_t kMaxGroupsPerFabric    = 5;
     static constexpr uint16_t kMaxGroupKeysPerFabric = 8;
 
-    CHIPCommand(const char * commandName, CredentialIssuerCommands * credIssuerCmds) :
-        Command(commandName), mCredIssuerCmds(credIssuerCmds)
+    CHIPCommand(const char * commandName, CredentialIssuerCommands * credIssuerCmds, const char * helpText = nullptr) :
+        Command(commandName, helpText), mCredIssuerCmds(credIssuerCmds)
     {
-        AddArgument("paa-trust-store-path", &mPaaTrustStorePath);
-        AddArgument("commissioner-name", &mCommissionerName);
-        AddArgument("commissioner-nodeid", 0, UINT64_MAX, &mCommissionerNodeId);
+        AddArgument("paa-trust-store-path", &mPaaTrustStorePath,
+                    "Path to directory holding PAA certificate information.  Can be absolute or relative to the current working "
+                    "directory.");
+        AddArgument("commissioner-name", &mCommissionerName,
+                    "Name of fabric to use. Valid values are \"alpha\", \"beta\", \"gamma\", and integers greater than or equal to "
+                    "4.  The default if not specified is \"alpha\".");
+        AddArgument("commissioner-nodeid", 0, UINT64_MAX, &mCommissionerNodeId,
+                    "The node id to use for chip-tool.  If not provided, kTestControllerNodeId (112233, 0x1B669) will be used.");
+        AddArgument("use-max-sized-certs", 0, 1, &mUseMaxSizedCerts,
+                    "Maximize the size of operational certificates. If not provided or 0 (\"false\"), normally sized operational "
+                    "certificates are generated.");
 #if CHIP_CONFIG_TRANSPORT_TRACE_ENABLED
         AddArgument("trace_file", &mTraceFile);
         AddArgument("trace_log", 0, 1, &mTraceLog);
+        AddArgument("trace_decode", 0, 1, &mTraceDecode);
 #endif // CHIP_CONFIG_TRANSPORT_TRACE_ENABLED
         AddArgument("ble-adapter", 0, UINT64_MAX, &mBleAdapterId);
     }
@@ -90,13 +102,32 @@ protected:
     // Get the wait duration, in seconds, before the command times out.
     virtual chip::System::Clock::Timeout GetWaitDuration() const = 0;
 
-    // Shut down the command, in case any work needs to be done after the event
-    // loop has been stopped.
-    virtual void Shutdown() {}
+    // Shut down the command.  After a Shutdown call the command object is ready
+    // to be used for another command invocation.
+    virtual void Shutdown() { ResetArguments(); }
 
+    // Clean up any resources allocated by the command.  Some commands may hold
+    // on to resources after Shutdown(), but Cleanup() will guarantee those are
+    // cleaned up.
+    virtual void Cleanup() {}
+
+    // If true, skip calling Cleanup() when in interactive mode, so the command
+    // can keep doing work as needed.  Cleanup() will be called when quitting
+    // interactive mode.  This method will be called before Shutdown, so it can
+    // use member values that Shutdown will normally reset.
+    virtual bool DeferInteractiveCleanup() { return false; }
+
+    // Execute any deferred cleanups.  Used when exiting interactive mode.
+    static void ExecuteDeferredCleanups(intptr_t ignored);
+
+#ifdef CONFIG_USE_LOCAL_STORAGE
     PersistentStorage mDefaultStorage;
     PersistentStorage mCommissionerStorage;
-    chip::Credentials::GroupDataProviderImpl mGroupDataProvider{ kMaxGroupsPerFabric, kMaxGroupKeysPerFabric };
+#endif // CONFIG_USE_LOCAL_STORAGE
+    chip::PersistentStorageOperationalKeystore mOperationalKeystore;
+    chip::Credentials::PersistentStorageOpCertStore mOpCertStore;
+
+    static chip::Credentials::GroupDataProviderImpl sGroupDataProvider;
     CredentialIssuerCommands * mCredIssuerCmds;
 
     std::string GetIdentity();
@@ -107,19 +138,29 @@ protected:
     // --identity "instance name" when running a command.
     ChipDeviceCommissioner & CurrentCommissioner();
 
+    ChipDeviceCommissioner & GetCommissioner(std::string identity);
+
 private:
     CHIP_ERROR MaybeSetUpStack();
-    CHIP_ERROR MaybeTearDownStack();
+    void MaybeTearDownStack();
 
-    CHIP_ERROR InitializeCommissioner(std::string key, chip::FabricId fabricId,
-                                      const chip::Credentials::AttestationTrustStore * trustStore);
-    CHIP_ERROR ShutdownCommissioner(std::string key);
+    CHIP_ERROR EnsureCommissionerForIdentity(std::string identity);
+
+    CHIP_ERROR InitializeCommissioner(std::string key, chip::FabricId fabricId);
+    void ShutdownCommissioner(std::string key);
     chip::FabricId CurrentCommissionerId();
     static std::map<std::string, std::unique_ptr<ChipDeviceCommissioner>> mCommissioners;
+    static std::set<CHIPCommand *> sDeferredCleanups;
+
     chip::Optional<char *> mCommissionerName;
     chip::Optional<chip::NodeId> mCommissionerNodeId;
     chip::Optional<uint16_t> mBleAdapterId;
     chip::Optional<char *> mPaaTrustStorePath;
+    chip::Optional<bool> mUseMaxSizedCerts;
+
+    // Cached trust store so commands other than the original startup command
+    // can spin up commissioners as needed.
+    static const chip::Credentials::AttestationTrustStore * sPaaTrustStore;
 
     static void RunQueuedCommand(intptr_t commandArg);
 
@@ -140,5 +181,6 @@ private:
 #if CHIP_CONFIG_TRANSPORT_TRACE_ENABLED
     chip::Optional<char *> mTraceFile;
     chip::Optional<bool> mTraceLog;
+    chip::Optional<bool> mTraceDecode;
 #endif // CHIP_CONFIG_TRANSPORT_TRACE_ENABLED
 };

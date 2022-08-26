@@ -18,7 +18,7 @@
 
 get_filename_component(CHIP_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../.. REALPATH)
 get_filename_component(CHEF ${CMAKE_CURRENT_SOURCE_DIR}/../../ REALPATH)
-get_filename_component(GEN_DIR ${CHEF}/zap-generated/ REALPATH)
+get_filename_component(GEN_DIR ${CHEF}/out/${SAMPLE_NAME}/zap-generated REALPATH)
 
 # include(${CMAKE_CURRENT_LIST_DIR}/../../project_include.cmake)
 
@@ -33,6 +33,7 @@ set(PRIV_INCLUDE_DIRS_LIST
                       "${CMAKE_SOURCE_DIR}/third_party/connectedhomeip/examples/platform/esp32/"
                       "${CMAKE_SOURCE_DIR}/third_party/connectedhomeip/third_party/nlio/repo/include"
                       "${CMAKE_SOURCE_DIR}/../"
+                      "${GEN_DIR}/../"
                       "${CMAKE_SOURCE_DIR}/main/include/"
 )
 
@@ -66,6 +67,7 @@ set(SRC_DIRS_LIST
                       "${CMAKE_SOURCE_DIR}/third_party/connectedhomeip/src/app/util"
                       "${CMAKE_SOURCE_DIR}/third_party/connectedhomeip/src/app/reporting"
                       "${CMAKE_SOURCE_DIR}/third_party/connectedhomeip/zzz_generated/app-common/app-common/zap-generated/attributes"
+                      "${CMAKE_SOURCE_DIR}/../common"
 )
 
 if (CONFIG_ENABLE_CHIP_SHELL)
@@ -106,7 +108,7 @@ idf_component_register(PRIV_INCLUDE_DIRS
                       SRC_DIRS ${SRC_DIRS_LIST})
 
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
-target_compile_options(${COMPONENT_LIB} PRIVATE "-DLWIP_IPV6_SCOPES=0" "-DCHIP_HAVE_CONFIG_H")
+target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONFIG_H")
 target_compile_options(${COMPONENT_LIB} PUBLIC
            "-DCHIP_ADDRESS_RESOLVE_IMPL_INCLUDE_HEADER=<lib/address_resolve/AddressResolve_DefaultImpl.h>"
 )
@@ -130,7 +132,7 @@ pw_proto_library(attributes_service
   STRIP_PREFIX
     ${CHIP_ROOT}/examples/common/pigweed/protos
   DEPS
-    pw_protobuf.common_protos
+    pw_protobuf.common_proto
 )
 
 pw_proto_library(button_service
@@ -141,7 +143,18 @@ pw_proto_library(button_service
   STRIP_PREFIX
     ${CHIP_ROOT}/examples/common/pigweed/protos
   DEPS
-    pw_protobuf.common_protos
+    pw_protobuf.common_proto
+)
+
+pw_proto_library(descriptor_service
+  SOURCES
+    ${CHIP_ROOT}/examples/common/pigweed/protos/descriptor_service.proto
+  PREFIX
+    descriptor_service
+  STRIP_PREFIX
+    ${CHIP_ROOT}/examples/common/pigweed/protos
+  DEPS
+    pw_protobuf.common_proto
 )
 
 pw_proto_library(device_service
@@ -154,12 +167,26 @@ pw_proto_library(device_service
   STRIP_PREFIX
     ${CHIP_ROOT}/examples/common/pigweed/protos
   DEPS
-    pw_protobuf.common_protos
+    pw_protobuf.common_proto
+)
+
+pw_proto_library(wifi_service
+  SOURCES
+    ${CHIP_ROOT}/examples/common/pigweed/protos/wifi_service.proto
+  INPUTS
+    ${CHIP_ROOT}/examples/common/pigweed/protos/wifi_service.options
+  PREFIX
+    wifi_service
+  DEPS
+    pw_protobuf.common_proto
+  STRIP_PREFIX
+    ${CHIP_ROOT}/examples/common/pigweed/protos
 )
 
 target_link_libraries(${COMPONENT_LIB} PUBLIC
   attributes_service.nanopb_rpc
   button_service.nanopb_rpc
+  descriptor_service.nanopb_rpc
   device_service.nanopb_rpc
   pw_checksum
   pw_hdlc
@@ -169,6 +196,7 @@ target_link_libraries(${COMPONENT_LIB} PUBLIC
   pw_trace_tokenized.trace_buffer
   pw_trace_tokenized.rpc_service
   pw_trace_tokenized.protos.nanopb_rpc
+  wifi_service.nanopb_rpc
 )
 
 target_link_options(${COMPONENT_LIB}
@@ -180,6 +208,8 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
                        "-DPW_RPC_ATTRIBUTE_SERVICE=1"
                        "-DPW_RPC_BUTTON_SERVICE=1"
                        "-DPW_RPC_DEVICE_SERVICE=1"
+                       "-DPW_RPC_DESCRIPTOR_SERVICE=1"
+                       "-DPW_RPC_WIFI_SERVICE=1"
                        "-DPW_RPC_TRACING_SERVICE=1")
 
 endif (CONFIG_ENABLE_PW_RPC)

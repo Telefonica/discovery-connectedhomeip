@@ -25,7 +25,7 @@
 #include <lib/support/CodeUtils.h>
 #include <lib/support/DLLUtil.h>
 #include <lib/support/logging/CHIPLogging.h>
-#include <messaging/ExchangeContext.h>
+#include <messaging/ExchangeHolder.h>
 #include <messaging/ExchangeMgr.h>
 #include <messaging/Flags.h>
 #include <protocols/Protocols.h>
@@ -41,6 +41,8 @@ namespace app {
 class WriteHandler : public Messaging::ExchangeDelegate
 {
 public:
+    WriteHandler() : mExchangeCtx(*this) {}
+
     /**
      *  Initialize the WriteHandler. Within the lifetime
      *  of this instance, this method is invoked once after object
@@ -74,6 +76,11 @@ public:
      */
     void Abort();
 
+    /**
+     *  Clean up state when we are done sending the write response.
+     */
+    void Close();
+
     bool IsFree() const { return mState == State::Uninitialized; }
 
     ~WriteHandler() override = default;
@@ -82,17 +89,10 @@ public:
     CHIP_ERROR ProcessGroupAttributeDataIBs(TLV::TLVReader & aAttributeDataIBsReader);
 
     CHIP_ERROR AddStatus(const ConcreteDataAttributePath & aPath, const Protocols::InteractionModel::Status aStatus);
-    CHIP_ERROR AddStatus(const ConcreteDataAttributePath & aPath, const StatusIB & aStatus);
 
-    CHIP_ERROR AddClusterSpecificSuccess(const AttributePathParams & aAttributePathParams, uint8_t aClusterStatus)
-    {
-        return CHIP_ERROR_NOT_IMPLEMENTED;
-    }
+    CHIP_ERROR AddClusterSpecificSuccess(const ConcreteDataAttributePath & aAttributePathParams, uint8_t aClusterStatus);
 
-    CHIP_ERROR AddClusterSpecificFailure(const AttributePathParams & aAttributePathParams, uint8_t aClusterStatus)
-    {
-        return CHIP_ERROR_NOT_IMPLEMENTED;
-    }
+    CHIP_ERROR AddClusterSpecificFailure(const ConcreteDataAttributePath & aAttributePathParams, uint8_t aClusterStatus);
 
     FabricIndex GetAccessingFabricIndex() const;
 
@@ -103,7 +103,7 @@ public:
 
     bool MatchesExchangeContext(Messaging::ExchangeContext * apExchangeContext) const
     {
-        return !IsFree() && mpExchangeCtx == apExchangeContext;
+        return !IsFree() && mExchangeCtx.Get() == apExchangeContext;
     }
 
     void CacheACLCheckResult(const AttributeAccessToken & aToken) { mACLCheckCache.SetValue(aToken); }
@@ -119,6 +119,7 @@ public:
     }
 
 private:
+    friend class TestWriteInteraction;
     enum class State
     {
         Uninitialized = 0, // The handler has not been initialized
@@ -126,9 +127,10 @@ private:
         AddStatus,         // The handler has added status code
         Sending,           // The handler has sent out the write response
     };
-    Protocols::InteractionModel::Status ProcessWriteRequest(System::PacketBufferHandle && aPayload, bool aIsTimedWrite);
-    Protocols::InteractionModel::Status HandleWriteRequestMessage(Messaging::ExchangeContext * apExchangeContext,
-                                                                  System::PacketBufferHandle && aPayload, bool aIsTimedWrite);
+    using Status = Protocols::InteractionModel::Status;
+    Status ProcessWriteRequest(System::PacketBufferHandle && aPayload, bool aIsTimedWrite);
+    Status HandleWriteRequestMessage(Messaging::ExchangeContext * apExchangeContext, System::PacketBufferHandle && aPayload,
+                                     bool aIsTimedWrite);
 
     CHIP_ERROR FinalizeMessage(System::PacketBufferTLVWriter && aMessageWriter, System::PacketBufferHandle & packet);
     CHIP_ERROR SendWriteResponse(System::PacketBufferTLVWriter && aMessageWriter);
@@ -136,10 +138,6 @@ private:
     void MoveToState(const State aTargetState);
     void ClearState();
     const char * GetStateStr() const;
-    /**
-     *  Clean up state when we are done sending the write response.
-     */
-    void Close();
 
     void DeliverListWriteBegin(const ConcreteAttributePath & aPath);
     void DeliverListWriteEnd(const ConcreteAttributePath & aPath, bool writeWasSuccessful);
@@ -157,13 +155,15 @@ private:
     // ProcessGroupAttributeDataIBs.
     CHIP_ERROR DeliverFinalListWriteEndForGroupWrite(bool writeWasSuccessful);
 
+    CHIP_ERROR AddStatus(const ConcreteDataAttributePath & aPath, const StatusIB & aStatus);
+
 private:
     // ExchangeDelegate
     CHIP_ERROR OnMessageReceived(Messaging::ExchangeContext * apExchangeContext, const PayloadHeader & aPayloadHeader,
                                  System::PacketBufferHandle && aPayload) override;
     void OnResponseTimeout(Messaging::ExchangeContext * apExchangeContext) override;
 
-    Messaging::ExchangeContext * mpExchangeCtx = nullptr;
+    Messaging::ExchangeHolder mExchangeCtx;
     WriteResponseMessage::Builder mWriteResponseBuilder;
     State mState           = State::Uninitialized;
     bool mIsTimedRequest   = false;

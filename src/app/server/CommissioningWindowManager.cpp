@@ -27,6 +27,8 @@
 using namespace chip::app::Clusters;
 using namespace chip::System::Clock;
 
+using AdministratorCommissioning::CommissioningWindowStatus;
+
 namespace {
 
 // As per specifications (Section 13.3), Nodes SHALL exit commissioning mode after 20 failed commission attempts.
@@ -55,17 +57,25 @@ void CommissioningWindowManager::OnPlatformEvent(const DeviceLayer::ChipDeviceEv
         DeviceLayer::SystemLayer().CancelTimer(HandleCommissioningWindowTimeout, this);
         mCommissioningTimeoutTimerArmed = false;
         Cleanup();
-        mServer->GetSecureSessionManager().ExpireAllPASEPairings();
+        mServer->GetSecureSessionManager().ExpireAllPASESessions();
+        // That should have cleared out mPASESession.
+#if CONFIG_NETWORK_LAYER_BLE
+        mServer->GetBleLayerObject()->CloseAllBleConnections();
+#endif
     }
     else if (event->Type == DeviceLayer::DeviceEventType::kFailSafeTimerExpired)
     {
         ChipLogError(AppServer, "Failsafe timer expired");
+        if (mPASESession)
+        {
+            mPASESession->AsSecureSession()->MarkForEviction();
+        }
         HandleFailedAttempt(CHIP_ERROR_TIMEOUT);
     }
     else if (event->Type == DeviceLayer::DeviceEventType::kOperationalNetworkEnabled)
     {
         app::DnssdServer::Instance().AdvertiseOperational();
-        ChipLogError(AppServer, "Operational advertising enabled");
+        ChipLogProgress(AppServer, "Operational advertising enabled");
     }
 }
 
@@ -83,7 +93,10 @@ void CommissioningWindowManager::ResetState()
     mECMDiscriminator = 0;
     mECMIterations    = 0;
     mECMSaltLength    = 0;
-    mWindowStatus     = app::Clusters::AdministratorCommissioning::CommissioningWindowStatus::kWindowNotOpen;
+    mWindowStatus     = CommissioningWindowStatus::kWindowNotOpen;
+
+    mOpenerFabricIndex.SetNull();
+    mOpenerVendorId.SetNull();
 
     memset(&mECMPASEVerifier, 0, sizeof(mECMPASEVerifier));
     memset(mECMSalt, 0, sizeof(mECMSalt));
@@ -95,12 +108,6 @@ void CommissioningWindowManager::ResetState()
 void CommissioningWindowManager::Cleanup()
 {
     StopAdvertisement(/* aShuttingDown = */ false);
-    DeviceLayer::FailSafeContext & failSafeContext = DeviceLayer::DeviceControlServer::DeviceControlSvr().GetFailSafeContext();
-    if (failSafeContext.IsFailSafeArmed())
-    {
-        failSafeContext.ForceFailSafeTimerExpiry();
-    }
-
     ResetState();
 }
 
@@ -113,7 +120,7 @@ void CommissioningWindowManager::OnSessionEstablishmentError(CHIP_ERROR err)
 void CommissioningWindowManager::HandleFailedAttempt(CHIP_ERROR err)
 {
     mFailedCommissioningAttempts++;
-    ChipLogError(AppServer, "Commissioning failed (attempt %d): %s", mFailedCommissioningAttempts, ErrorStr(err));
+    ChipLogError(AppServer, "Commissioning failed (attempt %d): %" CHIP_ERROR_FORMAT, mFailedCommissioningAttempts, err.Format());
 #if CONFIG_NETWORK_LAYER_BLE
     mServer->GetBleLayerObject()->CloseAllBleConnections();
 #endif
@@ -144,19 +151,9 @@ void CommissioningWindowManager::OnSessionEstablishmentStarted()
     DeviceLayer::SystemLayer().StartTimer(kPASESessionEstablishmentTimeout, HandleSessionEstablishmentTimeout, this);
 }
 
-void CommissioningWindowManager::OnSessionEstablished()
+void CommissioningWindowManager::OnSessionEstablished(const SessionHandle & session)
 {
     DeviceLayer::SystemLayer().CancelTimer(HandleSessionEstablishmentTimeout, this);
-    SessionHolder sessionHolder;
-    CHIP_ERROR err = mServer->GetSecureSessionManager().NewPairing(
-        sessionHolder, Optional<Transport::PeerAddress>::Value(mPairingSession.GetPeerAddress()), mPairingSession.GetPeerNodeId(),
-        &mPairingSession, CryptoContext::SessionRole::kResponder, 0);
-    if (err != CHIP_NO_ERROR)
-    {
-        ChipLogError(AppServer, "Commissioning failed while setting up secure channel: err %s", ErrorStr(err));
-        OnSessionEstablishmentError(err);
-        return;
-    }
 
     ChipLogProgress(AppServer, "Commissioning completed session establishment step");
     if (mAppDelegate != nullptr)
@@ -168,9 +165,10 @@ void CommissioningWindowManager::OnSessionEstablished()
 
     StopAdvertisement(/* aShuttingDown = */ false);
 
-    DeviceLayer::FailSafeContext & failSafeContext = DeviceLayer::DeviceControlServer::DeviceControlSvr().GetFailSafeContext();
+    auto & failSafeContext = Server::GetInstance().GetFailSafeContext();
     // This should never be armed because we don't allow CASE sessions to arm the failsafe when the commissioning window is open and
     // we check that the failsafe is not armed before opening the commissioning window. None the less, it is good to double-check.
+    CHIP_ERROR err = CHIP_NO_ERROR;
     if (failSafeContext.IsFailSafeArmed())
     {
         ChipLogError(AppServer, "Error - arm failsafe is already armed on PASE session establishment completion");
@@ -181,19 +179,30 @@ void CommissioningWindowManager::OnSessionEstablished()
         if (err != CHIP_NO_ERROR)
         {
             ChipLogError(AppServer, "Error arming failsafe on PASE session establishment completion");
+            // Don't allow a PASE session to hang around without a fail-safe.
+            session->AsSecureSession()->MarkForEviction();
+            HandleFailedAttempt(err);
         }
     }
 
     ChipLogProgress(AppServer, "Device completed Rendezvous process");
+
+    if (err == CHIP_NO_ERROR)
+    {
+        // When the now-armed fail-safe is disarmed or expires it will handle
+        // clearing out mPASESession.
+        mPASESession.Grab(session);
+    }
 }
 
 CHIP_ERROR CommissioningWindowManager::OpenCommissioningWindow(Seconds16 commissioningTimeout)
 {
-    VerifyOrReturnError(commissioningTimeout <= MaxCommissioningTimeout() &&
-                            commissioningTimeout >= mMinCommissioningTimeoutOverride.ValueOr(MinCommissioningTimeout()),
+    VerifyOrReturnError(commissioningTimeout <= MaxCommissioningTimeout() && commissioningTimeout >= MinCommissioningTimeout(),
                         CHIP_ERROR_INVALID_ARGUMENT);
-    DeviceLayer::FailSafeContext & failSafeContext = DeviceLayer::DeviceControlServer::DeviceControlSvr().GetFailSafeContext();
-    VerifyOrReturnError(!failSafeContext.IsFailSafeArmed(), CHIP_ERROR_INCORRECT_STATE);
+    auto & failSafeContext = Server::GetInstance().GetFailSafeContext();
+    VerifyOrReturnError(failSafeContext.IsFailSafeFullyDisarmed(), CHIP_ERROR_INCORRECT_STATE);
+
+    ReturnErrorOnFailure(Dnssd::ServiceAdvertiser::Instance().UpdateCommissionableInstanceName());
 
     ReturnErrorOnFailure(DeviceLayer::SystemLayer().StartTimer(commissioningTimeout, HandleCommissioningWindowTimeout, this));
 
@@ -215,9 +224,8 @@ CHIP_ERROR CommissioningWindowManager::AdvertiseAndListenForPASE()
     if (mUseECM)
     {
         ReturnErrorOnFailure(SetTemporaryDiscriminator(mECMDiscriminator));
-        ReturnErrorOnFailure(mPairingSession.WaitForPairing(
-            mServer->GetSecureSessionManager(), mECMPASEVerifier, mECMIterations, ByteSpan(mECMSalt, mECMSaltLength),
-            Optional<ReliableMessageProtocolConfig>::Value(GetLocalMRPConfig()), this));
+        ReturnErrorOnFailure(mPairingSession.WaitForPairing(mServer->GetSecureSessionManager(), mECMPASEVerifier, mECMIterations,
+                                                            ByteSpan(mECMSalt, mECMSaltLength), GetLocalMRPConfig(), this));
     }
     else
     {
@@ -239,8 +247,7 @@ CHIP_ERROR CommissioningWindowManager::AdvertiseAndListenForPASE()
         ReturnErrorOnFailure(verifier.Deserialize(ByteSpan(serializedVerifier)));
 
         ReturnErrorOnFailure(mPairingSession.WaitForPairing(mServer->GetSecureSessionManager(), verifier, iterationCount, saltSpan,
-                                                            Optional<ReliableMessageProtocolConfig>::Value(GetLocalMRPConfig()),
-                                                            this));
+                                                            GetLocalMRPConfig(), this));
     }
 
     ReturnErrorOnFailure(StartAdvertisement());
@@ -274,9 +281,21 @@ CHIP_ERROR CommissioningWindowManager::OpenBasicCommissioningWindow(Seconds16 co
     return err;
 }
 
+CHIP_ERROR
+CommissioningWindowManager::OpenBasicCommissioningWindowForAdministratorCommissioningCluster(
+    System::Clock::Seconds16 commissioningTimeout, FabricIndex fabricIndex, VendorId vendorId)
+{
+    ReturnErrorOnFailure(OpenBasicCommissioningWindow(commissioningTimeout, CommissioningWindowAdvertisement::kDnssdOnly));
+
+    mOpenerFabricIndex.SetNonNull(fabricIndex);
+    mOpenerVendorId.SetNonNull(vendorId);
+
+    return CHIP_NO_ERROR;
+}
+
 CHIP_ERROR CommissioningWindowManager::OpenEnhancedCommissioningWindow(Seconds16 commissioningTimeout, uint16_t discriminator,
                                                                        Spake2pVerifier & verifier, uint32_t iterations,
-                                                                       ByteSpan salt)
+                                                                       ByteSpan salt, FabricIndex fabricIndex, VendorId vendorId)
 {
     // Once a device is operational, it shall be commissioned into subsequent fabrics using
     // the operational network only.
@@ -301,15 +320,55 @@ CHIP_ERROR CommissioningWindowManager::OpenEnhancedCommissioningWindow(Seconds16
     {
         Cleanup();
     }
+    else
+    {
+        mOpenerFabricIndex.SetNonNull(fabricIndex);
+        mOpenerVendorId.SetNonNull(vendorId);
+    }
+
     return err;
 }
 
 void CommissioningWindowManager::CloseCommissioningWindow()
 {
-    if (mWindowStatus != AdministratorCommissioning::CommissioningWindowStatus::kWindowNotOpen)
+    if (IsCommissioningWindowOpen())
     {
+#if CONFIG_NETWORK_LAYER_BLE
+        if (mListeningForPASE)
+        {
+            // We never established PASE, so never armed a fail-safe and hence
+            // can't rely on it expiring to close our BLE connection.  Do that
+            // manually here.
+            mServer->GetBleLayerObject()->CloseAllBleConnections();
+        }
+#endif
         ChipLogProgress(AppServer, "Closing pairing window");
         Cleanup();
+    }
+}
+
+CommissioningWindowStatus CommissioningWindowManager::CommissioningWindowStatusForCluster() const
+{
+    if (mOpenerVendorId.IsNull())
+    {
+        // Not opened via the cluster.
+        return CommissioningWindowStatus::kWindowNotOpen;
+    }
+
+    return mWindowStatus;
+}
+
+bool CommissioningWindowManager::IsCommissioningWindowOpen() const
+{
+    return mWindowStatus != CommissioningWindowStatus::kWindowNotOpen;
+}
+
+void CommissioningWindowManager::OnFabricRemoved(FabricIndex removedIndex)
+{
+    if (!mOpenerFabricIndex.IsNull() && mOpenerFabricIndex.Value() == removedIndex)
+    {
+        // Per spec, we should clear out the stale fabric index.
+        mOpenerFabricIndex.SetNull();
     }
 }
 
@@ -325,9 +384,9 @@ Dnssd::CommissioningMode CommissioningWindowManager::GetCommissioningMode() cons
 
     switch (mWindowStatus)
     {
-    case AdministratorCommissioning::CommissioningWindowStatus::kEnhancedWindowOpen:
+    case CommissioningWindowStatus::kEnhancedWindowOpen:
         return Dnssd::CommissioningMode::kEnabledEnhanced;
-    case AdministratorCommissioning::CommissioningWindowStatus::kBasicWindowOpen:
+    case CommissioningWindowStatus::kBasicWindowOpen:
         return Dnssd::CommissioningMode::kEnabledBasic;
     default:
         return Dnssd::CommissioningMode::kDisabled;
@@ -342,31 +401,39 @@ CHIP_ERROR CommissioningWindowManager::StartAdvertisement()
 #endif
 
 #if CHIP_DEVICE_CONFIG_ENABLE_SED
-    if (!mIsBLE && mWindowStatus == AdministratorCommissioning::CommissioningWindowStatus::kWindowNotOpen)
+    if (!mIsBLE && !IsCommissioningWindowOpen())
     {
-        DeviceLayer::ConnectivityMgr().RequestSEDFastPollingMode(true);
+        DeviceLayer::ConnectivityMgr().RequestSEDActiveMode(true);
     }
 #endif
 
 #if CONFIG_NETWORK_LAYER_BLE
     if (mIsBLE)
     {
-        ReturnErrorOnFailure(chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(true));
+        CHIP_ERROR err = chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(true);
+        // BLE advertising may just not be supported.  That should not prevent
+        // us from opening a commissioning window and advertising over IP.
+        if (err == CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE)
+        {
+            ChipLogProgress(AppServer, "BLE networking available but BLE advertising is not supported");
+            err = CHIP_NO_ERROR;
+        }
+        ReturnErrorOnFailure(err);
     }
 #endif // CONFIG_NETWORK_LAYER_BLE
+
+    if (mUseECM)
+    {
+        mWindowStatus = CommissioningWindowStatus::kEnhancedWindowOpen;
+    }
+    else
+    {
+        mWindowStatus = CommissioningWindowStatus::kBasicWindowOpen;
+    }
 
     if (mAppDelegate != nullptr)
     {
         mAppDelegate->OnCommissioningWindowOpened();
-    }
-
-    if (mUseECM)
-    {
-        mWindowStatus = AdministratorCommissioning::CommissioningWindowStatus::kEnhancedWindowOpen;
-    }
-    else
-    {
-        mWindowStatus = AdministratorCommissioning::CommissioningWindowStatus::kBasicWindowOpen;
     }
 
     // reset all advertising, switching to our new commissioning mode.
@@ -384,9 +451,9 @@ CHIP_ERROR CommissioningWindowManager::StopAdvertisement(bool aShuttingDown)
     mPairingSession.Clear();
 
 #if CHIP_DEVICE_CONFIG_ENABLE_SED
-    if (!mIsBLE && mWindowStatus != AdministratorCommissioning::CommissioningWindowStatus::kWindowNotOpen)
+    if (!mIsBLE && IsCommissioningWindowOpen())
     {
-        DeviceLayer::ConnectivityMgr().RequestSEDFastPollingMode(false);
+        DeviceLayer::ConnectivityMgr().RequestSEDActiveMode(false);
     }
 #endif
 
@@ -402,7 +469,10 @@ CHIP_ERROR CommissioningWindowManager::StopAdvertisement(bool aShuttingDown)
 #if CONFIG_NETWORK_LAYER_BLE
     if (mIsBLE)
     {
-        ReturnErrorOnFailure(chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false));
+        // Ignore errors from SetBLEAdvertisingEnabled (which could be due to
+        // BLE advertising not being supported at all).  Our commissioning
+        // window is now closed and we need to notify our delegate of that.
+        (void) chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
     }
 #endif // CONFIG_NETWORK_LAYER_BLE
 
@@ -429,6 +499,31 @@ void CommissioningWindowManager::HandleCommissioningWindowTimeout(chip::System::
     auto * commissionMgr                           = static_cast<CommissioningWindowManager *>(aAppState);
     commissionMgr->mCommissioningTimeoutTimerArmed = false;
     commissionMgr->CloseCommissioningWindow();
+}
+
+void CommissioningWindowManager::OnSessionReleased()
+{
+    // The PASE session has died, probably due to CloseSession.  Immediately
+    // expire the fail-safe, if it's still armed (which it might not be if the
+    // PASE session is being released due to the fail-safe expiring or being
+    // disarmed).
+    //
+    // Expiring the fail-safe will make us start listening for new PASE sessions
+    // as needed.
+    //
+    // Note that at this point the fail-safe _must_ be associated with our PASE
+    // session, since we arm it when the PASE session is set up, and anything
+    // that disarms the fail-safe would also tear down the PASE session.
+    ExpireFailSafeIfArmed();
+}
+
+void CommissioningWindowManager::ExpireFailSafeIfArmed()
+{
+    auto & failSafeContext = Server::GetInstance().GetFailSafeContext();
+    if (failSafeContext.IsFailSafeArmed())
+    {
+        failSafeContext.ForceFailSafeTimerExpiry();
+    }
 }
 
 } // namespace chip

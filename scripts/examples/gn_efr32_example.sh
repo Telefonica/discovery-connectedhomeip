@@ -19,12 +19,22 @@
 # Build script for GN EFT32 examples GitHub workflow.
 
 set -e
-source "$(dirname "$0")/../../scripts/activate.sh"
+
+if [[ -z "${MATTER_ROOT}" ]]; then
+    echo "Using default path for Matter root"
+    CHIP_ROOT="$(dirname "$0")/../.."
+else
+    echo "Using ENV path for Matter root"
+    CHIP_ROOT="$MATTER_ROOT"
+fi
+
+source "$CHIP_ROOT/scripts/activate.sh"
 
 set -x
 env
 USE_WIFI=false
-CHIP_ROOT="$(dirname "$0")/../.."
+
+SILABS_THREAD_TARGET=\""../silabs:ot-efr32-cert"\"
 USAGE="./scripts/examples/gn_efr32_example.sh <AppRootFolder> <outputFolder> <efr32_board_name> [<Build options>]"
 
 if [ "$#" == "0" ]; then
@@ -83,12 +93,18 @@ if [ "$#" == "0" ]; then
             Use to build the example with pigweed RPC
         OTA_periodic_query_timeout
             Periodic query timeout variable for OTA in seconds
+        rs91x_wpa3_only
+            Support for WPA3 only mode on RS91x
         Presets
         --sed
             enable sleepy end device, set thread mtd
             For minimum consumption, disable openthread cli and qr code
         --wifi <wf200 | rs911x>
             build wifi example variant for given exansion board
+        --additional_data_advertising
+            enable Addition data advertissing and rotating device ID
+        --use_ot_lib
+            use the silabs openthread library
     "
 elif [ "$#" -lt "2" ]; then
     echo "Invalid number of arguments
@@ -128,6 +144,18 @@ else
                 optArgs+="enable_sleepy_device=true chip_openthread_ftd=false "
                 shift
                 ;;
+            --chip_enable_wifi_ipv4)
+                optArgs+="chip_enable_wifi_ipv4=true "
+                shift
+                ;;
+            --additional_data_advertising)
+                optArgs+="chip_enable_additional_data_advertising=true chip_enable_rotating_device_id=true "
+                shift
+                ;;
+            --use_ot_lib)
+                optArgs+="use_silabs_thread_lib=true chip_openthread_target=$SILABS_THREAD_TARGET openthread_external_platform=\"""\" "
+                shift
+                ;;
             *)
                 if [ "$1" =~ *"use_rs911x=true"* ] || [ "$1" =~ *"use_wf200=true"* ]; then
                     USE_WIFI=true
@@ -161,18 +189,4 @@ else
     #print stats
     arm-none-eabi-size -A "$BUILD_DIR"/*.out
 
-    # Generate bootloader file
-    if [ "${BUILD_DIR:0:2}" == "./" ]; then
-        BUILD_DIR_TRIMMED="${BUILD_DIR:2}"
-        S37_PATH=$(find "$BUILD_DIR_TRIMMED" -type f -name "*.s37")
-        if [ -z "$S37_PATH" ]; then
-            echo "Bootloader could not be built"
-        else
-            TARGET_PATH=${S37_PATH%????}
-            OTA_PATH="$TARGET_PATH".ota
-            commander gbl create "$TARGET_PATH".gbl --app "$S37_PATH"
-            GBL_PATH="$TARGET_PATH".gbl
-            ./src/app/ota_image_tool.py create -v 0xFFF1 -p 0x8005 -vn 1 -vs "1.0" -da sha256 "$GBL_PATH" "$OTA_PATH"
-        fi
-    fi
 fi

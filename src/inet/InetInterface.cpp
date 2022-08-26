@@ -30,9 +30,11 @@
 #include <inet/InetInterface.h>
 
 #include <inet/IPPrefix.h>
+#include <lib/support/CHIPMem.h>
 #include <lib/support/CHIPMemString.h>
 #include <lib/support/CodeUtils.h>
 #include <lib/support/DLLUtil.h>
+#include <lib/support/SafeInt.h>
 
 #if CHIP_SYSTEM_CONFIG_USE_LWIP && !CHIP_SYSTEM_CONFIG_USE_OPEN_THREAD_ENDPOINT
 #include <lwip/netif.h>
@@ -56,6 +58,10 @@
 #if CHIP_SYSTEM_CONFIG_USE_ZEPHYR_NET_IF
 #include <net/net_if.h>
 #endif // CHIP_SYSTEM_CONFIG_USE_ZEPHYR_NET_IF
+
+#if CHIP_SYSTEM_CONFIG_USE_OPEN_THREAD_ENDPOINT
+#include <inet/UDPEndPointImplOpenThread.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -105,15 +111,31 @@ bool InterfaceIterator::Next()
     // TODO : Cleanup #17346
     return false;
 }
+
+InterfaceAddressIterator::InterfaceAddressIterator()
+{
+    mNetifAddrList = nullptr;
+    mCurAddr       = nullptr;
+}
+
 bool InterfaceAddressIterator::HasCurrent()
 {
-    return mIntfIter.HasCurrent();
+    return (mNetifAddrList != nullptr) ? (mCurAddr != nullptr) : Next();
 }
 
 bool InterfaceAddressIterator::Next()
 {
-    // TODO : Cleanup #17346
-    return false;
+    if (mNetifAddrList == nullptr)
+    {
+        mNetifAddrList = otIp6GetUnicastAddresses(Inet::globalOtInstance);
+        mCurAddr       = mNetifAddrList;
+    }
+    else if (mCurAddr != nullptr)
+    {
+        mCurAddr = mCurAddr->mNext;
+    }
+
+    return (mCurAddr != nullptr);
 }
 CHIP_ERROR InterfaceAddressIterator::GetAddress(IPAddress & outIPAddress)
 {
@@ -122,7 +144,7 @@ CHIP_ERROR InterfaceAddressIterator::GetAddress(IPAddress & outIPAddress)
         return CHIP_ERROR_SENTINEL;
     }
 
-    outIPAddress = IPAddress((*(mAddrInfoList[mCurAddrIndex].mAddress)));
+    outIPAddress = IPAddress(mCurAddr->mAddress);
     return CHIP_NO_ERROR;
 }
 
@@ -414,6 +436,21 @@ CHIP_ERROR InterfaceId::GetInterfaceName(char * nameBuf, size_t nameBufSize) con
 
 CHIP_ERROR InterfaceId::InterfaceNameToId(const char * intfName, InterfaceId & interface)
 {
+    // First attempt to parse as a numeric ID:
+    char * parseEnd;
+    unsigned long intfNum = strtoul(intfName, &parseEnd, 10);
+    if (*parseEnd == 0)
+    {
+        if (intfNum > 0 && intfNum < UINT8_MAX && CanCastTo<InterfaceId::PlatformType>(intfNum))
+        {
+            interface = InterfaceId(static_cast<InterfaceId::PlatformType>(intfNum));
+            return CHIP_NO_ERROR;
+        }
+
+        return INET_ERROR_UNKNOWN_INTERFACE;
+    }
+
+    // Falling back to name -> ID lookup otherwise (e.g. wlan0)
     unsigned int intfId = if_nametoindex(intfName);
     interface           = InterfaceId(intfId);
     if (intfId == 0)
@@ -486,11 +523,11 @@ static void backport_if_freenameindex(struct if_nameindex * inArray)
     {
         if (inArray[i].if_name != NULL)
         {
-            free(inArray[i].if_name);
+            Platform::MemoryFree(inArray[i].if_name);
         }
     }
 
-    free(inArray);
+    Platform::MemoryFree(inArray);
 }
 
 static struct if_nameindex * backport_if_nameindex(void)
@@ -522,7 +559,7 @@ static struct if_nameindex * backport_if_nameindex(void)
         lastIntfName = addrIter->ifa_name;
     }
 
-    tmpval = (struct if_nameindex *) malloc((numIntf + 1) * sizeof(struct if_nameindex));
+    tmpval = (struct if_nameindex *) Platform::MemoryAlloc((numIntf + 1) * sizeof(struct if_nameindex));
     VerifyOrExit(tmpval != NULL, );
     memset(tmpval, 0, (numIntf + 1) * sizeof(struct if_nameindex));
 
@@ -554,7 +591,7 @@ static struct if_nameindex * backport_if_nameindex(void)
         }
     }
 
-    retval = (struct if_nameindex *) malloc((maxIntfNum + 1) * sizeof(struct if_nameindex));
+    retval = (struct if_nameindex *) Platform::MemoryAlloc((maxIntfNum + 1) * sizeof(struct if_nameindex));
     VerifyOrExit(retval != NULL, );
     memset(retval, 0, (maxIntfNum + 1) * sizeof(struct if_nameindex));
 
@@ -594,7 +631,7 @@ static struct if_nameindex * backport_if_nameindex(void)
 exit:
     if (tmpval != NULL)
     {
-        free(tmpval);
+        Platform::MemoryFree(tmpval);
     }
 
     if (addrList != NULL)
@@ -831,6 +868,8 @@ CHIP_ERROR InterfaceId::GetLinkLocalAddr(IPAddress * llAddr) const
 
     struct ifaddrs * ifaddr;
     const int rv = getifaddrs(&ifaddr);
+    bool found   = false;
+
     if (rv == -1)
     {
         return INET_ERROR_ADDRESS_NOT_FOUND;
@@ -844,9 +883,10 @@ CHIP_ERROR InterfaceId::GetLinkLocalAddr(IPAddress * llAddr) const
                 ((mPlatformInterface == 0) || (mPlatformInterface == if_nametoindex(ifaddr_iter->ifa_name))))
             {
                 struct in6_addr * sin6_addr = &(reinterpret_cast<struct sockaddr_in6 *>(ifaddr_iter->ifa_addr))->sin6_addr;
-                if (sin6_addr->s6_addr[0] == 0xfe && (sin6_addr->s6_addr[1] & 0xc0) == 0x80) // Link Local Address
+                if ((sin6_addr->s6_addr[0] == 0xfe) && ((sin6_addr->s6_addr[1] & 0xc0) == 0x80)) // Link Local Address
                 {
                     (*llAddr) = IPAddress((reinterpret_cast<struct sockaddr_in6 *>(ifaddr_iter->ifa_addr))->sin6_addr);
+                    found     = true;
                     break;
                 }
             }
@@ -854,7 +894,7 @@ CHIP_ERROR InterfaceId::GetLinkLocalAddr(IPAddress * llAddr) const
     }
     freeifaddrs(ifaddr);
 
-    return CHIP_NO_ERROR;
+    return (found) ? CHIP_NO_ERROR : INET_ERROR_ADDRESS_NOT_FOUND;
 }
 
 #endif // CHIP_SYSTEM_CONFIG_USE_SOCKETS && CHIP_SYSTEM_CONFIG_USE_BSD_IFADDRS

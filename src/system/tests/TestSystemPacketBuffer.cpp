@@ -36,6 +36,7 @@
 
 #include <lib/support/CHIPMem.h>
 #include <lib/support/CodeUtils.h>
+#include <lib/support/UnitTestContext.h>
 #include <lib/support/UnitTestRegistration.h>
 #include <platform/CHIPDeviceLayer.h>
 #include <system/SystemPacketBuffer.h>
@@ -230,10 +231,7 @@ int PacketBufferTest::TestSetup(void * inContext)
 
 int PacketBufferTest::TestTeardown(void * inContext)
 {
-    CHIP_ERROR err = chip::DeviceLayer::PlatformMgr().Shutdown();
-    // RTOS shutdown is not implemented, ignore CHIP_ERROR_NOT_IMPLEMENTED
-    if (err != CHIP_NO_ERROR && err != CHIP_ERROR_NOT_IMPLEMENTED)
-        return FAILURE;
+    chip::DeviceLayer::PlatformMgr().Shutdown();
 
     chip::Platform::MemoryShutdown();
 
@@ -291,7 +289,8 @@ void PacketBufferTest::PrepareTestBuffer(BufferConfiguration * config, int flags
         config->handle = PacketBufferHandle::New(chip::System::PacketBuffer::kMaxSizeWithoutReserve, 0);
         if (config->handle.IsNull())
         {
-            printf("NewPacketBuffer: Failed to allocate packet buffer (%zu retained): %s\n", handles.size(), strerror(errno));
+            printf("NewPacketBuffer: Failed to allocate packet buffer (%u retained): %s\n",
+                   static_cast<unsigned int>(handles.size()), strerror(errno));
             exit(EXIT_FAILURE);
         }
         if (flags & kRecordHandle)
@@ -344,12 +343,12 @@ bool PacketBufferTest::ResetHandles()
         const PacketBufferHandle & handle = handles[i];
         if (handle.Get() == nullptr)
         {
-            printf("TestTerminate: handle %zu null\n", i);
+            printf("TestTerminate: handle %u null\n", static_cast<unsigned int>(i));
             handles_ok = false;
         }
         else if (handle->ref != 1)
         {
-            printf("TestTerminate: handle %zu buffer=%p ref=%u\n", i, handle.Get(), handle->ref);
+            printf("TestTerminate: handle %u buffer=%p ref=%u\n", static_cast<unsigned int>(i), handle.Get(), handle->ref);
             handles_ok = false;
             while (handle->ref > 1)
             {

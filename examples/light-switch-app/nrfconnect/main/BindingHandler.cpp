@@ -21,7 +21,7 @@
 #include "ShellCommands.h"
 #endif
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(app, CONFIG_MATTER_LOG_LEVEL);
 
 using namespace chip;
@@ -46,20 +46,24 @@ void BindingHandler::OnInvokeCommandFailure(DeviceProxy * aDevice, BindingData &
             return;
 
         // Release current CASE session.
-        error = aDevice->Disconnect();
-
-        if (CHIP_NO_ERROR != error)
-        {
-            LOG_ERR("Disconnecting from CASE session failed due to: %" CHIP_ERROR_FORMAT, error.Format());
-            return;
-        }
+        aDevice->Disconnect();
 
         // Set flag to not try recover session multiple times.
         BindingHandler::GetInstance().mCaseSessionRecovered = true;
 
+        // Allocate new object to make sure its life time will be appropriate.
+        BindingHandler::BindingData * data = Platform::New<BindingHandler::BindingData>();
+        *data                              = aBindingData;
+
         // Establish new CASE session and retrasmit command that was not applied.
         error = BindingManager::GetInstance().NotifyBoundClusterChanged(aBindingData.EndpointId, aBindingData.ClusterId,
-                                                                        static_cast<void *>(&aBindingData));
+                                                                        static_cast<void *>(data));
+
+        if (CHIP_NO_ERROR != error)
+        {
+            LOG_ERR("NotifyBoundClusterChanged failed due to: %" CHIP_ERROR_FORMAT, error.Format());
+            return;
+        }
     }
     else
     {
@@ -67,8 +71,8 @@ void BindingHandler::OnInvokeCommandFailure(DeviceProxy * aDevice, BindingData &
     }
 }
 
-void BindingHandler::OnOffProcessCommand(CommandId aCommandId, const EmberBindingTableEntry & aBinding, DeviceProxy * aDevice,
-                                         void * aContext)
+void BindingHandler::OnOffProcessCommand(CommandId aCommandId, const EmberBindingTableEntry & aBinding,
+                                         OperationalDeviceProxy * aDevice, void * aContext)
 {
     CHIP_ERROR ret     = CHIP_NO_ERROR;
     BindingData * data = reinterpret_cast<BindingData *>(aContext);
@@ -84,6 +88,12 @@ void BindingHandler::OnOffProcessCommand(CommandId aCommandId, const EmberBindin
     auto onFailure = [aDevice, dataRef = *data](CHIP_ERROR aError) mutable {
         BindingHandler::OnInvokeCommandFailure(aDevice, dataRef, aError);
     };
+
+    if (aDevice)
+    {
+        // We are validating connection is ready once here instead of multiple times in each case statement below.
+        VerifyOrDie(aDevice->ConnectionReady());
+    }
 
     switch (aCommandId)
     {
@@ -140,7 +150,7 @@ void BindingHandler::OnOffProcessCommand(CommandId aCommandId, const EmberBindin
 }
 
 void BindingHandler::LevelControlProcessCommand(CommandId aCommandId, const EmberBindingTableEntry & aBinding,
-                                                DeviceProxy * aDevice, void * aContext)
+                                                OperationalDeviceProxy * aDevice, void * aContext)
 {
     BindingData * data = reinterpret_cast<BindingData *>(aContext);
 
@@ -157,6 +167,12 @@ void BindingHandler::LevelControlProcessCommand(CommandId aCommandId, const Embe
     };
 
     CHIP_ERROR ret = CHIP_NO_ERROR;
+
+    if (aDevice)
+    {
+        // We are validating connection is ready once here instead of multiple times in each case statement below.
+        VerifyOrDie(aDevice->ConnectionReady());
+    }
 
     switch (aCommandId)
     {
@@ -185,7 +201,8 @@ void BindingHandler::LevelControlProcessCommand(CommandId aCommandId, const Embe
     }
 }
 
-void BindingHandler::LightSwitchChangedHandler(const EmberBindingTableEntry & binding, DeviceProxy * deviceProxy, void * context)
+void BindingHandler::LightSwitchChangedHandler(const EmberBindingTableEntry & binding, OperationalDeviceProxy * deviceProxy,
+                                               void * context)
 {
     VerifyOrReturn(context != nullptr, LOG_ERR("Invalid context for Light switch handler"););
     BindingData * data = static_cast<BindingData *>(context);
@@ -222,6 +239,13 @@ void BindingHandler::LightSwitchChangedHandler(const EmberBindingTableEntry & bi
     }
 }
 
+void BindingHandler::LightSwitchContextReleaseHandler(void * context)
+{
+    VerifyOrReturn(context != nullptr, LOG_ERR("Invalid context for Light switch context release handler"););
+
+    Platform::Delete(static_cast<BindingData *>(context));
+}
+
 void BindingHandler::InitInternal(intptr_t aArg)
 {
     LOG_INF("Initialize binding Handler");
@@ -234,6 +258,7 @@ void BindingHandler::InitInternal(intptr_t aArg)
     }
 
     BindingManager::GetInstance().RegisterBoundDeviceChangedHandler(LightSwitchChangedHandler);
+    BindingManager::GetInstance().RegisterBoundDeviceContextReleaseHandler(LightSwitchContextReleaseHandler);
     BindingHandler::GetInstance().PrintBindingTable();
 }
 
@@ -298,6 +323,4 @@ void BindingHandler::SwitchWorkerHandler(intptr_t aContext)
     BindingData * data = reinterpret_cast<BindingData *>(aContext);
     LOG_INF("Notify Bounded Cluster | endpoint: %d cluster: %d", data->EndpointId, data->ClusterId);
     BindingManager::GetInstance().NotifyBoundClusterChanged(data->EndpointId, data->ClusterId, static_cast<void *>(data));
-
-    Platform::Delete(data);
 }
