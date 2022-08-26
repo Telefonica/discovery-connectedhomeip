@@ -29,6 +29,10 @@
 #include <common/CHIPDeviceManager.h>
 #include <common/CommonDeviceCallbacks.h>
 
+#include "driver/temperature_sensor.h"
+
+extern temperature_sensor_handle_t temp_handle;
+
 class AppDeviceCallbacks : public CommonDeviceCallbacks
 {
 public:

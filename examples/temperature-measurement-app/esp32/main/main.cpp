@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include <app/server/Server.h>
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <common/CHIPDeviceManager.h>
 #include <common/Esp32AppServer.h>
 #include <credentials/DeviceAttestationCredsProvider.h>
@@ -68,6 +69,10 @@ using namespace ::chip;
 using namespace ::chip::DeviceManager;
 using namespace ::chip::Credentials;
 
+using namespace chip::app::Clusters::TemperatureMeasurement::Attributes;
+
+temperature_sensor_handle_t temp_handle;
+
 const char * TAG = "temperature-measurement-app";
 
 static AppDeviceCallbacks EchoCallbacks;
@@ -104,6 +109,13 @@ extern "C" void app_main()
         ESP_LOGE(TAG, "nvs_flash_init() failed: %s", esp_err_to_name(err));
         return;
     }
+
+    // Initialize touch pad peripheral, it will start a timer to run a filter
+    ESP_LOGI(TAG, "Initializing Temperature sensor");
+    temperature_sensor_config_t temp_sensor = TEMPERAUTRE_SENSOR_CONFIG_DEFAULT(10, 50);
+    ESP_ERROR_CHECK(temperature_sensor_install(&temp_sensor, &temp_handle));
+    ESP_ERROR_CHECK(temperature_sensor_start(temp_handle));
+    ESP_LOGI(TAG, "Temperature sensor started");
 
     DeviceLayer::SetDeviceInfoProvider(&gExampleDeviceInfoProvider);
 
