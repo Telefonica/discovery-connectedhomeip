@@ -1,0 +1,5 @@
+create
+--image
+0
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/zephyr/app_update.bin
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/zephyr/dfu_multi_image.bin

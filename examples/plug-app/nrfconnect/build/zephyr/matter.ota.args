@@ -1,0 +1,12 @@
+--vendor-id
+65521
+--product-id
+32773
+--version
+0
+--version-str
+prerelease
+--digest-algorithm
+sha256
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/zephyr/dfu_multi_image.bin
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/zephyr/matter.ota

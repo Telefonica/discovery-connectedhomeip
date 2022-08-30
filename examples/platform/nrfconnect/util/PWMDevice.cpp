@@ -26,6 +26,8 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/zephyr.h>
 
+using namespace ::chip;
+
 LOG_MODULE_DECLARE(app, CONFIG_MATTER_LOG_LEVEL);
 
 int PWMDevice::Init(const pwm_dt_spec * aPWMDevice, uint8_t aMinLevel, uint8_t aMaxLevel, uint8_t aDefaultLevel)
@@ -51,6 +53,13 @@ void PWMDevice::SetCallbacks(PWMCallback aActionInitiatedClb, PWMCallback aActio
     mActionInitiatedClb = aActionInitiatedClb;
     mActionCompletedClb = aActionCompletedClb;
 }
+
+void PWMDevice::SetCallbacksEndpoints(PWMCallbackEndpoints aActionInitiatedClbEndpoints, PWMCallbackEndpoints aActionCompletedClbEndpoints)
+{
+    mActionInitiatedClbEndpoints = aActionInitiatedClbEndpoints;
+    mActionCompletedClbEndpoints = aActionCompletedClbEndpoints;
+}
+
 
 bool PWMDevice::InitiateAction(Action_t aAction, int32_t aActor, uint8_t * aValue)
 {
@@ -102,6 +111,38 @@ bool PWMDevice::InitiateAction(Action_t aAction, int32_t aActor, uint8_t * aValu
         if (mActionCompletedClb)
         {
             mActionCompletedClb(aAction, aActor);
+        }
+    }
+
+    return action_initiated;
+}
+
+bool PWMDevice::InitiateActionEndpoints(Action_t aAction, int32_t aActor, uint8_t * aValue, chip::EndpointId endpointId)
+{
+    // TODO: this function is called InitiateAction because we want to implement some features such as ramping up here.
+    bool action_initiated = true;
+    State_t new_state;
+
+    if (action_initiated)
+    {
+        if (mActionInitiatedClbEndpoints)
+        {
+            mActionInitiatedClbEndpoints(aAction, aActor, endpointId);
+        }
+
+        if (aAction == ON_ACTION || aAction == OFF_ACTION)
+        {
+            Set(new_state == kState_On);
+        }
+        else if (aAction == LEVEL_ACTION)
+        {
+            mState = new_state;
+            SetLevel(*aValue);
+        }
+
+        if (mActionCompletedClbEndpoints)
+        {
+            mActionCompletedClbEndpoints(aAction, aActor, endpointId);
         }
     }
 

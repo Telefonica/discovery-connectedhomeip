@@ -1,0 +1,25 @@
+{
+    "format-version": 0,
+    "time": 1661857305,
+    "files": [
+        {
+            "load_address": 29184,
+            "version_MCUBOOT": "0.0.0+0",
+            "type": "application",
+            "board": "nrf52840dk_nrf52840",
+            "soc": "nRF52840_QIAA",
+            "size": 936998,
+            "file": "app_update.bin",
+            "modtime": 1661857302
+        }
+    ],
+    "name": "nrfconnect",
+    "firmware": {
+        "zephyr": {
+            "revision": "be360e7db2db7e1f0e9fcac686a08e62e350bf55"
+        },
+        "nrf": {
+            "revision": "053756565898659278f957e5f58000cc0491a88d-dirty"
+        }
+    }
+}

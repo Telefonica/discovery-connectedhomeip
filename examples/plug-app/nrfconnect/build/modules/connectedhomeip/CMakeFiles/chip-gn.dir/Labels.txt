@@ -1,0 +1,13 @@
+# Target labels
+ chip-gn
+# Source files and their labels
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/CMakeFiles/chip-gn
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/CMakeFiles/chip-gn.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/CMakeFiles/chip-gn-complete.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-build.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-configure.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-download.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-install.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-mkdir.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-patch.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/connectedhomeip/src/chip-gn-stamp/chip-gn-update.rule

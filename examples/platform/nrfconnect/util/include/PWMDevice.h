@@ -21,6 +21,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pwm.h>
 
+#include <lib/core/DataModelTypes.h>
+
 class PWMDevice
 {
 public:
@@ -40,6 +42,7 @@ public:
     };
 
     using PWMCallback = void (*)(Action_t, int32_t);
+    using PWMCallbackEndpoints = void (*)(Action_t, int32_t, chip::EndpointId);
 
     int Init(const pwm_dt_spec * aPWMDevice, uint8_t aMinLevel, uint8_t aMaxLevel, uint8_t aDefaultLevel = 0);
     bool IsTurnedOn() const { return mState == kState_On; }
@@ -47,7 +50,9 @@ public:
     uint8_t GetMinLevel() const { return mMinLevel; }
     uint8_t GetMaxLevel() const { return mMaxLevel; }
     bool InitiateAction(Action_t aAction, int32_t aActor, uint8_t * aValue);
+    bool InitiateActionEndpoints(Action_t aAction, int32_t aActor, uint8_t * aValue, chip::EndpointId enpointId);
     void SetCallbacks(PWMCallback aActionInitiatedClb, PWMCallback aActionCompletedClb);
+    void SetCallbacksEndpoints(PWMCallbackEndpoints aActionInitiatedClbEndpoints, PWMCallbackEndpoints aActionCompletedClbEndpoints);
     const device * GetDevice() { return mPwmDevice->dev; }
 
 private:
@@ -60,6 +65,9 @@ private:
 
     PWMCallback mActionInitiatedClb;
     PWMCallback mActionCompletedClb;
+    
+    PWMCallbackEndpoints mActionInitiatedClbEndpoints;
+    PWMCallbackEndpoints mActionCompletedClbEndpoints;
 
     void Set(bool aOn);
     void SetLevel(uint8_t aLevel);

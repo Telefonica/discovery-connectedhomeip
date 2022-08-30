@@ -1,0 +1,13 @@
+# Target labels
+ mcuboot_subimage
+# Source files and their labels
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/CMakeFiles/mcuboot_subimage
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/CMakeFiles/mcuboot_subimage.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/CMakeFiles/mcuboot_subimage-complete.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-build.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-configure.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-download.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-install.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-mkdir.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-patch.rule
+/home/rusky4/Downloads/discovery-connectedhomeip/examples/plug-app/nrfconnect/build/modules/mcuboot/mcuboot_subimage-prefix/src/mcuboot_subimage-stamp/mcuboot_subimage-update.rule

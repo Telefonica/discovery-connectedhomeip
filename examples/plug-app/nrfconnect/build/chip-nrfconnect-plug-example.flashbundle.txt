@@ -1,0 +1,4 @@
+chip-nrfconnect-plug-example/firmware_utils.py
+chip-nrfconnect-plug-example/nrfconnect_firmware_utils.py
+chip-nrfconnect-plug-example/chip-nrfconnect-plug-example.flash.py
+chip-nrfconnect-plug-example/chip-nrfconnect-plug-example.hex
